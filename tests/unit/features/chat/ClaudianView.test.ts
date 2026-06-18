@@ -7,7 +7,6 @@ const MockScope = Scope as typeof Scope & { instances: Scope[] };
 
 function createViewHarness(options: {
   canCreateTab: boolean;
-  tabBarPosition?: 'input' | 'header';
   tabCount?: number;
 }): {
   newTabButtonEl: ReturnType<typeof createMockEl>;
@@ -17,9 +16,7 @@ function createViewHarness(options: {
   const view = Object.create(ClaudianView.prototype) as any;
 
   view.plugin = {
-    settings: {
-      tabBarPosition: options.tabBarPosition ?? 'input',
-    },
+    settings: {},
   };
   view.tabManager = {
     canCreateTab: jest.fn().mockReturnValue(options.canCreateTab),
@@ -27,7 +24,6 @@ function createViewHarness(options: {
   };
   view.tabBarContainerEl = createMockEl();
   view.logoEl = createMockEl();
-  view.titleTextEl = createMockEl();
   view.newTabButtonEl = newTabButtonEl;
 
   return { newTabButtonEl, view };
@@ -57,32 +53,24 @@ describe('ClaudianView tab controls', () => {
     expect(newTabButtonEl.getAttribute('aria-hidden')).toBeNull();
   });
 
-  it('keeps tab controls in the view-owned input row in input mode', () => {
-    const tabBarContainerEl = createMockEl();
+  it('keeps tab controls in the view-owned input row', () => {
     const navRowContent = createMockEl();
-    const headerActionsContent = createMockEl();
-    const headerActionsEl = createMockEl();
     const inputNavRowHostEl = createMockEl();
-    const navRowEl = createMockEl();
     const view = Object.create(ClaudianView.prototype) as any;
 
     view.containerEl = createMockEl();
-    view.plugin = { settings: { tabBarPosition: 'input' } };
-    view.tabBarContainerEl = tabBarContainerEl;
     view.navRowContent = navRowContent;
-    view.headerActionsContent = headerActionsContent;
-    view.headerActionsEl = headerActionsEl;
     view.inputNavRowHostEl = inputNavRowHostEl;
-    view.tabManager = {
-      getActiveTab: jest.fn().mockReturnValue({ dom: { navRowEl } }),
+    view.tabBar = {
+      captureScrollPosition: jest.fn(),
+      restoreScrollPosition: jest.fn(),
     };
 
-    view.updateNavRowLocation();
+    view.attachNavRowContentToInputFooter();
 
     expect(inputNavRowHostEl.children).toContain(navRowContent);
-    expect(navRowContent.children).toContain(tabBarContainerEl);
-    expect(navRowContent.children).toContain(headerActionsContent);
-    expect(navRowEl.children).not.toContain(navRowContent);
+    expect(view.tabBar.captureScrollPosition).toHaveBeenCalledTimes(1);
+    expect(view.tabBar.restoreScrollPosition).toHaveBeenCalledTimes(1);
   });
 
   it('moves only the active tab input into the stable input slot', () => {
