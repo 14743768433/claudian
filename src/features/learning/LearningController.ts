@@ -6,8 +6,8 @@ import { ObsidianVaultAdapter } from './adapters/ObsidianVaultAdapter';
 import { LearningService } from './application/LearningService';
 import { SkillSeeder } from './content/SkillSeeder';
 import { LearningStateMachine } from './flow/LearningStateMachine';
-import { LessonProgression } from './flow/LessonProgression';
-import { SummaryService } from './flow/SummaryService';
+import { LessonProgression } from './application/coordinators/LessonProgression';
+import { SummaryService } from './application/SummaryService';
 import { LearningPluginIndex } from './state/LearningPluginIndex';
 import { LearningStateService } from './state/LearningStateService';
 
@@ -21,9 +21,9 @@ export class LearningController extends LearningService {
     const stateService = new LearningStateService(adapter, index);
     const stateMachine = new LearningStateMachine(stateService);
     const progression = new LessonProgression(
-      plugin,
+      turns,
       stateMachine,
-      new SummaryService(plugin),
+      new SummaryService(turns),
       notice,
     );
     super({

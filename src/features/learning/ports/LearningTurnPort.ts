@@ -27,4 +27,5 @@ export interface LearningTurnPort {
   findOpenTabForConversation(conversationId: string, attempts?: number): Promise<LearningOpenTab | null>;
   persistUiMessageBlocks(conversationId: string, assistantMessageId: string, blocks: MessageUiBlock[]): Promise<void>;
   hasAssistantResponse(conversationId: string): Promise<boolean>;
+  generateConciseSummary(conversationId: string, prompt: string): Promise<string | null>;
 }

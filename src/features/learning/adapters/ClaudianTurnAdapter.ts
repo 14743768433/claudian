@@ -3,6 +3,8 @@ import type {
   LearningActivityContentBlock,
   MessageUiBlock,
 } from '../../../core/types';
+import { ProviderRegistry } from '../../../core/providers/ProviderRegistry';
+import type { TitleGenerationResult, TitleGenerationService } from '../../../core/providers/types';
 import type ClaudianPlugin from '../../../main';
 import type {
   LearningOpenTab,
@@ -65,7 +67,12 @@ function conversationHasAssistantResponse(conversation: Pick<Conversation, 'last
 }
 
 export class ClaudianTurnAdapter implements LearningTurnPort {
-  constructor(private readonly plugin: ClaudianPlugin) {}
+  constructor(
+    private readonly plugin: ClaudianPlugin,
+    private readonly createTitleService: (plugin: ClaudianPlugin) => TitleGenerationService = (plugin) => (
+      ProviderRegistry.createTitleGenerationService(plugin)
+    ),
+  ) {}
 
   async createConversation(title?: string): Promise<{ id: string }> {
     const conversation = await this.plugin.createConversation();
@@ -154,5 +161,36 @@ export class ClaudianTurnAdapter implements LearningTurnPort {
     }
     const conversation = await this.getConversation(conversationId);
     return conversationHasAssistantResponse(conversation);
+  }
+
+  async generateConciseSummary(conversationId: string, prompt: string): Promise<string | null> {
+    const service = this.createTitleService(this.plugin);
+    try {
+      const result = await new Promise<TitleGenerationResult>((resolve) => {
+        let settled = false;
+        const finish = (next: TitleGenerationResult): void => {
+          if (!settled) {
+            settled = true;
+            resolve(next);
+          }
+        };
+
+        service.generateTitle(conversationId, prompt, async (_id, generationResult) => {
+          finish(generationResult);
+        }).then(
+          () => finish({ success: false, error: 'Title generation completed without a result' }),
+          (error: unknown) => finish({
+            success: false,
+            error: error instanceof Error ? error.message : 'Title generation failed',
+          }),
+        );
+      });
+
+      return result.success ? result.title.trim() || null : null;
+    } catch {
+      return null;
+    } finally {
+      service.cancel();
+    }
   }
 }

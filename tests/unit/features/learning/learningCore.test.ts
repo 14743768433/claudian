@@ -490,25 +490,20 @@ describe('SummaryService', () => {
       makeMessage('user', 'Explain low-pass filters.', 'm1'),
       makeMessage('assistant', 'We covered cutoff frequency, 50 Hz noise, and why smoothing preserves slow change.', 'm2'),
     ];
-    const plugin = {
-      getConversationById: jest.fn(async () => ({ messages })),
-    };
-    const titleService = {
-      generateTitle: jest.fn(async (conversationId, userMessage, callback) => {
+    const turns = {
+      getConversation: jest.fn(async () => ({ messages })),
+      generateConciseSummary: jest.fn(async (conversationId, userMessage) => {
         expect(conversationId).toBe('ai-tutor-summary:lesson-1');
         expect(userMessage).toContain('Chapter: Filters');
         expect(userMessage).toContain('filters.md');
-        await callback(conversationId, { success: true, title: 'Filter intuition handoff' });
+        return 'Filter intuition handoff';
       }),
-      cancel: jest.fn(),
     };
-    const createTitleService = jest.fn(() => titleService);
 
-    const summary = await new SummaryService(plugin as any, createTitleService as any).summarizeLesson(makeLesson());
+    const summary = await new SummaryService(turns as any).summarizeLesson(makeLesson());
 
-    expect(createTitleService).toHaveBeenCalledWith(plugin);
-    expect(titleService.generateTitle).toHaveBeenCalledTimes(1);
-    expect(titleService.cancel).toHaveBeenCalledTimes(1);
+    expect(turns.getConversation).toHaveBeenCalledWith('conv-1');
+    expect(turns.generateConciseSummary).toHaveBeenCalledTimes(1);
     expect(summary).toContain('Summary focus: Filter intuition handoff');
     expect(summary).toContain('cutoff frequency');
   });
@@ -517,17 +512,12 @@ describe('SummaryService', () => {
     const messages = [
       makeMessage('assistant', 'We practiced the section using 3 examples and wrote the first note.', 'm1'),
     ];
-    const plugin = {
-      getConversationById: jest.fn(async () => ({ messages })),
-    };
-    const titleService = {
-      generateTitle: jest.fn(async (conversationId, _userMessage, callback) => {
-        await callback(conversationId, { success: false, error: 'offline' });
-      }),
-      cancel: jest.fn(),
+    const turns = {
+      getConversation: jest.fn(async () => ({ messages })),
+      generateConciseSummary: jest.fn(async () => null),
     };
 
-    const summary = await new SummaryService(plugin as any, (() => titleService) as any).summarizeLesson(makeLesson());
+    const summary = await new SummaryService(turns as any).summarizeLesson(makeLesson());
 
     expect(summary).toBe('We practiced the section using 3 examples and wrote the first note.');
   });
@@ -546,20 +536,17 @@ describe('SummaryService', () => {
         '- Start new lesson',
       ].join('\n'), 'm1'),
     ];
-    const plugin = {
-      getConversationById: jest.fn(async () => ({ messages })),
-    };
-    const titleService = {
-      generateTitle: jest.fn(async (conversationId, userMessage, callback) => {
+    const turns = {
+      getConversation: jest.fn(async () => ({ messages })),
+      generateConciseSummary: jest.fn(async (_conversationId, userMessage) => {
         expect(userMessage).not.toContain('ai-tutor-action');
         expect(userMessage).not.toContain('startNewLesson');
         expect(userMessage).not.toContain('"options"');
-        await callback(conversationId, { success: true, title: 'Clean handoff' });
+        return 'Clean handoff';
       }),
-      cancel: jest.fn(),
     };
 
-    const summary = await new SummaryService(plugin as any, (() => titleService) as any).summarizeLesson(makeLesson());
+    const summary = await new SummaryService(turns as any).summarizeLesson(makeLesson());
 
     expect(summary).toContain('Summary focus: Clean handoff');
     expect(summary).toContain('We planned the next chapter');
@@ -569,15 +556,15 @@ describe('SummaryService', () => {
   });
 
   it('uses a deterministic fallback when no conversation text is available', async () => {
-    const plugin = {
-      getConversationById: jest.fn(async () => ({ messages: [] })),
+    const turns = {
+      getConversation: jest.fn(async () => ({ messages: [] })),
+      generateConciseSummary: jest.fn(),
     };
-    const createTitleService = jest.fn();
 
-    const summary = await new SummaryService(plugin as any, createTitleService as any).summarizeLesson(makeLesson());
+    const summary = await new SummaryService(turns as any).summarizeLesson(makeLesson());
 
     expect(summary).toBe('Covered Filters with 1 section(s).');
-    expect(createTitleService).not.toHaveBeenCalled();
+    expect(turns.generateConciseSummary).not.toHaveBeenCalled();
   });
 });
 
