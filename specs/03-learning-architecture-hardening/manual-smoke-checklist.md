@@ -8,9 +8,7 @@ Plugin dir: `D:\claudian\ai-tutor-test-vault\.obsidian\plugins\claudian-ai-tutor
 
 Before testing:
 
-- Run `npm run build`.
-- Run `npm run learning:deploy-test-vault`.
-- Run `npm run learning:verify-test-vault` and confirm it passes.
+- Run `npm run learning:smoke-ready`; this runs `verify`, deploys the current build to the test vault, verifies deployed hashes, and prints existing course IDs.
 - In Obsidian, reload or re-enable the AI Tutor plugin.
 
 Core smoke:
