@@ -34,7 +34,7 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 - `npm run verify`: passed.
 - `npm run learning:baseline` reports:
   - `src/features/learning/LearningController.ts`: 50 lines.
-  - `src/features/learning/application/LearningService.ts`: 916 lines after coordinator extraction.
+  - `src/features/learning/application/LearningService.ts`: 829 lines after coordinator extraction.
   - `src/features/chat/controllers/InputController.ts`: 1807 lines.
   - real `saveCourse` call site: `src/features/learning/application/StateTransitionService.ts`.
   - learning-feature `obsidian` imports only in `adapters/**` and `views/**`.
