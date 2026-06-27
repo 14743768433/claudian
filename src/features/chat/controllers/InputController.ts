@@ -30,11 +30,10 @@ import type {
   ChatMessage,
   ExitPlanModeDecision,
   LearningActivityContentBlock,
-  LearningActionResultContentBlock,
-  LearningNextStepsContentBlock,
   MessageUiBlock,
   StreamChunk,
 } from '../../../core/types';
+import { handleLearningAssistantCompletion } from '../../learning/adapters/LearningInputBridge';
 import type ClaudianPlugin from '../../../main';
 import { ResumeSessionDropdown } from '../../../shared/components/ResumeSessionDropdown';
 import { InstructionModal } from '../../../shared/modals/InstructionConfirmModal';
@@ -578,54 +577,16 @@ export class InputController {
           // Only clear resumeAtMessageId if enqueue succeeded; preserve checkpoint on failure for retry
           const saveExtras = didEnqueueToSdk ? { resumeAtMessageId: undefined } : undefined;
           await conversationController.save(true, saveExtras);
-          let learningRepairPrompt: string | null = null;
           const completedConversationId = conversationIdForSend ?? state.currentConversationId;
-          if (completedConversationId && finalLearningActivity) {
-            await this.persistMessageUiBlocks(completedConversationId, finalAssistantMsg.id, [finalLearningActivity]);
-          }
-          if (!didCancelThisTurn && completedConversationId) {
-            const learningCompletion = await plugin.learningController?.handleAssistantTurnComplete(
-              completedConversationId,
-              finalAssistantMsg.content,
-              finalAssistantMsg.id,
-            );
-            learningRepairPrompt = learningCompletion?.repairPrompt ?? null;
-            const actionBlocks: LearningActionResultContentBlock[] = learningCompletion?.actionOutcomes.map((outcome) => ({
-              type: 'learning_action_result',
-              actionType: outcome.actionType,
-              label: outcome.label,
-              status: outcome.status,
-              detail: outcome.detail,
-              message: outcome.message,
-              items: outcome.items,
-            })) ?? [];
-            const lessonPlanBlocks = learningCompletion?.actionOutcomes
-              .map((outcome) => outcome.lessonPlan)
-              .filter((block): block is NonNullable<typeof block> => !!block) ?? [];
-            const nextStepBlocks: LearningNextStepsContentBlock[] = learningCompletion?.nextSteps ?? [];
-
-            if (actionBlocks.length > 0 || lessonPlanBlocks.length > 0 || nextStepBlocks.length > 0) {
-              finalAssistantMsg.contentBlocks = [
-                ...(finalAssistantMsg.contentBlocks ?? []).filter(block => (
-                  block.type !== 'learning_action_result'
-                  && block.type !== 'learning_lesson_plan'
-                  && block.type !== 'learning_next_steps'
-                )),
-                ...actionBlocks,
-                ...lessonPlanBlocks,
-                ...nextStepBlocks,
-              ];
-              if (actionBlocks.length > 0) {
-                renderer.appendLearningActionResults(finalAssistantMsg.id, actionBlocks);
-              }
-              if (lessonPlanBlocks.length > 0) {
-                renderer.appendLearningLessonPlans(finalAssistantMsg.id, lessonPlanBlocks);
-              }
-              if (nextStepBlocks.length > 0) {
-                renderer.appendLearningNextSteps(finalAssistantMsg.id, nextStepBlocks);
-              }
-            }
-          }
+          const learningRepairPrompt = await handleLearningAssistantCompletion({
+            controller: plugin.learningController,
+            conversationId: completedConversationId,
+            assistantMessage: finalAssistantMsg,
+            didCancelTurn: didCancelThisTurn,
+            finalLearningActivity,
+            persistMessageUiBlocks: (id, messageId, blocks) => this.persistMessageUiBlocks(id, messageId, blocks),
+            renderer,
+          });
 
           const userMsgIndex = state.messages.indexOf(userMsg);
           renderer.refreshActionButtons(userMsg, state.messages, userMsgIndex >= 0 ? userMsgIndex : undefined);
