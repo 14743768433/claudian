@@ -3,6 +3,7 @@ import { ContentQualityGate } from '@/features/learning/content/ContentQualityGa
 import { LearningController } from '@/features/learning/LearningController';
 import { ActionRequestChannel } from '@/features/learning/flow/ActionRequestChannel';
 import { LearningStateMachine } from '@/features/learning/flow/LearningStateMachine';
+import { LearningStateMachine as DomainLearningStateMachine } from '@/features/learning/domain/LearningStateMachine';
 import { SummaryService } from '@/features/learning/flow/SummaryService';
 import { learningAppendix } from '@/features/learning/prompt/learningAppendix';
 import { LearningPluginIndex } from '@/features/learning/state/LearningPluginIndex';
@@ -301,6 +302,28 @@ describe('ActionRequestChannel', () => {
 });
 
 describe('LearningStateMachine', () => {
+  it('keeps the domain reducer pure by returning a next state', async () => {
+    const { service } = createStateService();
+    const course = await service.createCourse({
+      title: 'Signals',
+      goalTitle: 'Understand filters',
+      intakeConversationId: 'conv-intake',
+      now: 100,
+    });
+    const before = JSON.stringify(course);
+    const machine = new DomainLearningStateMachine();
+
+    const result = machine.reduce(course, {
+      type: 'generateSyllabus',
+      topics: [{ title: 'Filters' }],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.nextState?.machineState).toBe('chapterPlanning');
+    expect(course.machineState).toBe('intake');
+    expect(JSON.stringify(course)).toBe(before);
+  });
+
   it('rejects advancing before the current section note is written', async () => {
     const { service } = createStateService();
     const course = await service.createCourse({
