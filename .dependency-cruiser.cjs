@@ -1,12 +1,12 @@
 const LEARN = '^src/features/learning';
 const OBSIDIAN = '^obsidian$';
-const WARN = 'warn';
+const ERROR = 'error';
 
 module.exports = {
   forbidden: [
     {
       name: 'learning-domain-pure',
-      severity: WARN,
+      severity: ERROR,
       from: { path: `${LEARN}/domain` },
       to: {
         path: [
@@ -18,19 +18,19 @@ module.exports = {
     },
     {
       name: 'learning-application-no-obsidian',
-      severity: WARN,
+      severity: ERROR,
       from: { path: `${LEARN}/application` },
       to: { path: OBSIDIAN },
     },
     {
       name: 'learning-application-no-chat-internals',
-      severity: WARN,
+      severity: ERROR,
       from: { path: `${LEARN}/application` },
       to: { path: '^src/(main|core/runtime|features/chat)' },
     },
     {
       name: 'learning-only-adapters-views-controller-import-obsidian',
-      severity: WARN,
+      severity: ERROR,
       from: {
         path: LEARN,
         pathNot: `${LEARN}/(adapters|views)|${LEARN}/LearningController`,
@@ -39,13 +39,13 @@ module.exports = {
     },
     {
       name: 'learning-adapters-no-application',
-      severity: WARN,
+      severity: ERROR,
       from: { path: `${LEARN}/adapters` },
       to: { path: `${LEARN}/application` },
     },
     {
       name: 'learning-views-no-domain-logic',
-      severity: WARN,
+      severity: ERROR,
       from: { path: `${LEARN}/views` },
       to: {
         path: `${LEARN}/domain`,
@@ -54,13 +54,13 @@ module.exports = {
     },
     {
       name: 'learning-ports-are-pure',
-      severity: WARN,
+      severity: ERROR,
       from: { path: `${LEARN}/ports` },
       to: { path: `${LEARN}/(application|adapters|views|domain)/` },
     },
     {
       name: 'learning-no-direct-file-state-adapter-imports',
-      severity: WARN,
+      severity: ERROR,
       from: {
         path: LEARN,
         pathNot: `${LEARN}/application/StateTransitionService|${LEARN}/application/IndexRepository|${LEARN}/LearningController`,

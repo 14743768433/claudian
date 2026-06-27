@@ -21,6 +21,7 @@
     "audit:learning-state": "node scripts/audit-learning-state.mjs",
     "learning:baseline": "node scripts/learning-baseline.mjs",
     "depcruise": "depcruise src --config .dependency-cruiser.cjs",
+    "verify": "npm run depcruise && npm run typecheck && npm test && npm run build",
     "test": "node scripts/run-jest.js",
     "test:watch": "node scripts/run-jest.js --watch",
     "test:coverage": "node scripts/run-jest.js --coverage",

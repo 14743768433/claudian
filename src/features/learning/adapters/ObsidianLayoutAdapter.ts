@@ -20,7 +20,7 @@ type ChatView = {
 };
 
 function asCourseAwareView(leaf: WorkspaceLeaf): CourseAwareView {
-  return leaf.view as CourseAwareView;
+  return (leaf.view ?? {}) as CourseAwareView;
 }
 
 export class ObsidianLayoutAdapter implements LayoutPort {
