@@ -1,4 +1,4 @@
-import { VaultFileAdapter } from '../../../core/storage/VaultFileAdapter';
+import type { VaultPort } from '../ports/VaultPort';
 import { TransformationRegistry } from './TransformationRegistry';
 
 const SKILL_DIR_BY_ID = {
@@ -10,7 +10,7 @@ const SKILL_DIR_BY_ID = {
 
 export class SkillSeeder {
   constructor(
-    private readonly adapter: VaultFileAdapter,
+    private readonly adapter: Pick<VaultPort, 'exists' | 'write'>,
     private readonly registry = new TransformationRegistry(),
   ) {}
 
@@ -23,4 +23,3 @@ export class SkillSeeder {
     }
   }
 }
-

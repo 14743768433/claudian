@@ -8,6 +8,38 @@ export class ObsidianVaultAdapter extends VaultFileAdapter implements VaultPort 
     super(appRef);
   }
 
+  override async exists(path: string): Promise<boolean> {
+    const adapter = this.appRef.vault.adapter as { exists?: (path: string) => Promise<boolean> };
+    if (typeof adapter.exists === 'function') {
+      return adapter.exists(path);
+    }
+    return !!this.appRef.vault.getAbstractFileByPath?.(path);
+  }
+
+  override async read(path: string): Promise<string> {
+    const adapter = this.appRef.vault.adapter as { read?: (path: string) => Promise<string> };
+    if (typeof adapter.read === 'function') {
+      return adapter.read(path);
+    }
+    const file = this.appRef.vault.getAbstractFileByPath?.(path);
+    const vault = this.appRef.vault as typeof this.appRef.vault & {
+      cachedRead?: (file: TFile) => Promise<string>;
+    };
+    if (file instanceof TFile && typeof vault.cachedRead === 'function') {
+      return vault.cachedRead(file);
+    }
+    throw new Error(`Missing file: ${path}`);
+  }
+
+  override async write(path: string, content: string): Promise<void> {
+    const adapter = this.appRef.vault.adapter as { write?: (path: string, content: string) => Promise<void> };
+    if (typeof adapter.write === 'function') {
+      await super.write(path, content);
+      return;
+    }
+    throw new Error('Vault adapter does not support write.');
+  }
+
   async boundedRead(path: string, maxChars: number): Promise<string | null> {
     if (!(await this.exists(path))) return null;
     const markdown = await this.read(path);
