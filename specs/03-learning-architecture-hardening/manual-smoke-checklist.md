@@ -10,6 +10,7 @@ Legacy test vault, if needed: `D:\claudian\ai-tutor-test-vault`
 Before testing:
 
 - Run `npm run learning:smoke-ready -- --fresh`; this runs `verify`, prepares a clean smoke vault, enables the plugin, deploys the current build, verifies deployed hashes, and prints existing course IDs.
+- Run `npm run learning:open-smoke-vault` to open the prepared clean vault in Obsidian. Use `npm run learning:open-smoke-vault -- --print` if you only need the URI.
 - If you deliberately want the legacy test vault instead, run `npm run learning:smoke-ready`.
 - In Obsidian, reload or re-enable the AI Tutor plugin.
 

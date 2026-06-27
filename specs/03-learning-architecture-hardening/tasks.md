@@ -52,6 +52,7 @@
 - [x] `npm run learning:deploy-test-vault` 可将当前 build 输出部署到本机测试 vault，并自动运行部署校验。
 - [x] `npm run learning:verify-test-vault` 可校验本机测试 vault 插件文件与当前 build 输出一致。
 - [x] `npm run learning:smoke-ready -- --fresh` 可在真实 Obsidian smoke 前串行执行自动化质量门、准备干净 smoke vault、启用插件、部署测试库、校验部署 hash，并打印现有课程 ID。
+- [x] `npm run learning:open-smoke-vault` 可直接通过 Obsidian URI 打开准备好的干净 smoke vault；`-- --print` 可只打印 URI。
 - [x] `npm run learning:verify-manual-smoke` 可在真实 Obsidian smoke 后校验 `data.json`、`course-state.json`、章节笔记和 conversation metadata 的持久化一致性，并支持 `-- --list` 定位待校验课程。
 - [ ] （可选）加 `eslint-plugin-boundaries` strict 供 IDE 即时报错。
 - [x] `grep "from 'obsidian'"` 仅命中 `adapters/**` `views/**`。

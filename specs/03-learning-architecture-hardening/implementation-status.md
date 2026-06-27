@@ -16,6 +16,7 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 - `npm run learning:deploy-test-vault` copies build outputs into the local test vault plugin directory and runs the deployment verifier.
 - `npm run learning:verify-test-vault` verifies that `main.js`, `styles.css`, and `manifest.json` in `ai-tutor-test-vault/.obsidian/plugins/claudian-ai-tutor` match the current build outputs by SHA-256.
 - `npm run learning:smoke-ready -- --fresh` runs the full automated gate, prepares `ai-tutor-smoke-vault`, enables the plugin, deploys the test vault plugin, verifies deployment hashes, and prints existing course IDs before manual smoke.
+- `npm run learning:open-smoke-vault` opens the prepared clean vault via Obsidian URI; `-- --print` prints the URI without opening the app.
 - `npm run learning:verify-manual-smoke` is available as a post-Obsidian-smoke persistence verifier for the tested course state; `-- --list` lists course IDs when the tested course is not the newest entry.
 - `acceptance-audit.md` maps all Stage 03 acceptance criteria to evidence and keeps AC9 marked pending until real Obsidian smoke passes.
 - `npm run verify` passes locally: depcruise, typecheck, full Jest, build.
@@ -44,6 +45,7 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 - `npm run learning:deploy-test-vault`: passed.
 - `npm run learning:verify-test-vault`: passed.
 - `npm run learning:smoke-ready -- --fresh`: passed; `ai-tutor-smoke-vault` has the plugin enabled and no existing courses.
+- `npm run learning:open-smoke-vault -- --print`: passed.
 - `node scripts/verify-manual-smoke-state.mjs --vault <temp-fixture>`: passed against a clean fixture, including BOM-tolerant JSON parsing and course-list/error guidance.
 - `npm run learning:baseline` reports:
   - `src/features/learning/LearningController.ts`: 50 lines.
@@ -58,5 +60,5 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 ## Remaining Manual Gate
 
 - Real Obsidian smoke: new course -> intake -> plan chapter -> write section note -> continue section -> Start new lesson -> restart restore. This needs user-side verification in the clean smoke vault.
-- Before smoke, run `npm run learning:smoke-ready -- --fresh`; use `manual-smoke-checklist.md` in this spec folder to record the user-side smoke result.
+- Before smoke, run `npm run learning:smoke-ready -- --fresh`, then `npm run learning:open-smoke-vault`; use `manual-smoke-checklist.md` in this spec folder to record the user-side smoke result.
 - After that smoke, run `npm run learning:verify-manual-smoke -- --vault ai-tutor-smoke-vault`; use `npm run learning:verify-manual-smoke -- --vault ai-tutor-smoke-vault --list` first if the tested course ID is unclear.

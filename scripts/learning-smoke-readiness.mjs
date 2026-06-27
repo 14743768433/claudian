@@ -65,7 +65,9 @@ function printNextSteps() {
   process.stdout.write([
     '',
     'Ready for manual Obsidian smoke.',
-    `1. Open or reload this vault in Obsidian: ${vaultRoot}`,
+    args.fresh
+      ? '1. Open the smoke vault with npm run learning:open-smoke-vault.'
+      : `1. Open or reload this vault in Obsidian: ${vaultRoot}`,
     '2. Run the checklist in specs/03-learning-architecture-hardening/manual-smoke-checklist.md.',
     args.fresh
       ? '3. After the smoke, run npm run learning:verify-manual-smoke -- --vault ai-tutor-smoke-vault.'
