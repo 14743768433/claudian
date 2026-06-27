@@ -8,11 +8,6 @@ import type {
   MessageUiBlock,
 } from '../../../core/types';
 import type { ChatTurnRequest } from '../../../core/runtime/types';
-import type ClaudianPlugin from '../../../main';
-import { ClaudianTurnAdapter } from '../adapters/ClaudianTurnAdapter';
-import { ObsidianLayoutAdapter } from '../adapters/ObsidianLayoutAdapter';
-import { ObsidianNoticeAdapter } from '../adapters/ObsidianNoticeAdapter';
-import { ObsidianVaultAdapter } from '../adapters/ObsidianVaultAdapter';
 import { ContentQualityGate } from '../content/ContentQualityGate';
 import { SkillSeeder } from '../content/SkillSeeder';
 import { TransformationRegistry } from '../content/TransformationRegistry';
@@ -25,7 +20,7 @@ import { learningAppendix } from '../prompt/learningAppendix';
 import { LearningPluginIndex } from '../state/LearningPluginIndex';
 import { LearningStateService } from '../state/LearningStateService';
 import type { CourseIndexEntry, CourseState, LearningAction, LearningTurnMode, LessonSession, LoadedLessonRef } from '../state/types';
-import type { LearningOpenTab } from '../ports/LearningTurnPort';
+import type { LearningOpenTab, LearningTurnPort } from '../ports/LearningTurnPort';
 import type { LayoutPort } from '../ports/LayoutPort';
 import type { NoticePort } from '../ports/NoticePort';
 import type { VaultPort } from '../ports/VaultPort';
@@ -113,6 +108,18 @@ export interface LearningTurnCompletion {
   repairPrompt: string | null;
   actionOutcomes: LearningActionOutcome[];
   nextSteps: LearningNextStepsContentBlock[];
+}
+
+export interface LearningServiceDependencies {
+  adapter: VaultPort;
+  layout: LayoutPort;
+  turns: LearningTurnPort;
+  notice: NoticePort;
+  index: LearningPluginIndex;
+  stateService: LearningStateService;
+  stateMachine: LearningStateMachine;
+  progression: LessonProgression;
+  skillSeeder: SkillSeeder;
 }
 
 function emptyLearningTurnCompletion(): LearningTurnCompletion {
@@ -641,7 +648,7 @@ export class LearningService {
 
   private readonly adapter: VaultPort;
   private readonly layout: LayoutPort;
-  private readonly turns: ClaudianTurnAdapter;
+  private readonly turns: LearningTurnPort;
   private readonly notice: NoticePort;
   private readonly actionChannel = new ActionRequestChannel();
   private readonly contextInjector = new LearningContextInjector();
@@ -655,21 +662,16 @@ export class LearningService {
   private readonly repairAttempts = new Map<string, number>();
   private readonly maxRepairAttempts = 2;
 
-  constructor(private readonly plugin: ClaudianPlugin) {
-    this.adapter = new ObsidianVaultAdapter(plugin.app);
-    this.layout = new ObsidianLayoutAdapter(plugin);
-    this.turns = new ClaudianTurnAdapter(plugin);
-    this.notice = new ObsidianNoticeAdapter();
-    this.index = new LearningPluginIndex(plugin);
-    this.stateService = new LearningStateService(this.adapter, this.index);
-    this.stateMachine = new LearningStateMachine(this.stateService);
-    this.progression = new LessonProgression(
-      plugin,
-      this.stateMachine,
-      new SummaryService(plugin),
-      this.notice,
-    );
-    this.skillSeeder = new SkillSeeder(this.adapter);
+  constructor(deps: LearningServiceDependencies) {
+    this.adapter = deps.adapter;
+    this.layout = deps.layout;
+    this.turns = deps.turns;
+    this.notice = deps.notice;
+    this.index = deps.index;
+    this.stateService = deps.stateService;
+    this.stateMachine = deps.stateMachine;
+    this.progression = deps.progression;
+    this.skillSeeder = deps.skillSeeder;
   }
 
   async initialize(): Promise<void> {
