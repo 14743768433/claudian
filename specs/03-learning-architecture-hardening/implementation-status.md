@@ -11,7 +11,7 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 
 - Baseline commits and Stage 03 tooling are in git history.
 - `dependency-cruiser` is installed, `npm run depcruise` is configured, and rules run with `severity: "error"`.
-- `npm run learning:architecture-audit` is configured and included in `npm run verify`; it fails on legacy learning entrypoint imports, wrong top-level learning directories, illegal learning Obsidian imports, and `.saveCourse()` calls outside `StateTransitionService`.
+- `npm run learning:architecture-audit` is configured and included in `npm run verify`; it fails on legacy learning entrypoint imports, wrong top-level learning directories, illegal learning Obsidian imports, `.saveCourse()` calls outside `StateTransitionService`, course-index mutations outside `IndexRepository`, and production `applyToState()` calls outside the state-machine compatibility boundary.
 - Jest includes a persisted core-loop smoke for create course -> generate syllabus -> plan chapter -> write/register section note -> advance section -> start new lesson -> simulated restart restore from the plugin index and `course-state.json`.
 - `npm run learning:deploy-test-vault` copies build outputs into the local test vault plugin directory and runs the deployment verifier.
 - `npm run learning:verify-test-vault` verifies that `main.js`, `styles.css`, and `manifest.json` in `ai-tutor-test-vault/.obsidian/plugins/claudian-ai-tutor` match the current build outputs by SHA-256.

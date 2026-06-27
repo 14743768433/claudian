@@ -14,6 +14,8 @@ auditTopLevelDirectories();
 auditLegacyEntrypointImports();
 auditLearningObsidianImports();
 auditSaveCourseCalls();
+auditIndexMutationCalls();
+auditMutableCompatibilityCalls();
 
 if (failures.length > 0) {
   process.stderr.write('Learning architecture audit failed:\n');
@@ -92,6 +94,37 @@ function auditSaveCourseCalls() {
       if (!/\.\s*saveCourse\s*\(/.test(line)) return;
       if (rel !== allowed) {
         failures.push(`${rel}:${index + 1} calls .saveCourse() outside StateTransitionService.`);
+      }
+    });
+  }
+}
+
+function auditIndexMutationCalls() {
+  const allowed = 'src/features/learning/application/IndexRepository.ts';
+  for (const filePath of walkFiles(LEARNING_ROOT, '.ts')) {
+    const rel = toPosix(path.relative(ROOT, filePath));
+    const lines = fs.readFileSync(filePath, 'utf8').split(/\r\n|\r|\n/);
+    lines.forEach((line, index) => {
+      if (!/\.\s*(upsertIndex|removeIndex)\s*\(/.test(line)) return;
+      if (rel !== allowed) {
+        failures.push(`${rel}:${index + 1} mutates the course index outside IndexRepository.`);
+      }
+    });
+  }
+}
+
+function auditMutableCompatibilityCalls() {
+  const allowed = new Set([
+    'src/features/learning/application/LearningStateMachine.ts',
+    'src/features/learning/domain/LearningStateMachine.ts',
+  ]);
+  for (const filePath of walkFiles(LEARNING_ROOT, '.ts')) {
+    const rel = toPosix(path.relative(ROOT, filePath));
+    const lines = fs.readFileSync(filePath, 'utf8').split(/\r\n|\r|\n/);
+    lines.forEach((line, index) => {
+      if (!/\.\s*applyToState\s*\(/.test(line)) return;
+      if (!allowed.has(rel)) {
+        failures.push(`${rel}:${index + 1} calls mutable applyToState() outside the state-machine compatibility boundary.`);
       }
     });
   }
