@@ -1,21 +1,16 @@
 import type {
-  Conversation,
-  LearningActionResultContentBlock,
   LearningActivityContentBlock,
-  LearningLessonPlanContentBlock,
   LearningLessonPlanSource,
-  LearningNextStepsContentBlock,
-  MessageUiBlock,
 } from '../../../core/types';
 import type { ChatTurnRequest } from '../../../core/runtime/types';
 import { ContentQualityGate } from '../content/ContentQualityGate';
 import { SkillSeeder } from '../content/SkillSeeder';
 import { TransformationRegistry } from '../content/TransformationRegistry';
 import { LearningContextInjector } from '../context/LearningContextInjector';
-import { ActionRequestChannel } from './ActionRequestChannel';
 import { CommandCoordinator } from './coordinators/CommandCoordinator';
 import { LessonProgression } from './coordinators/LessonProgression';
 import { NavigationCoordinator } from './coordinators/NavigationCoordinator';
+import { TurnCoordinator, type LearningTurnCompletion } from './coordinators/TurnCoordinator';
 import { IndexRepository } from './IndexRepository';
 import { learningAppendix } from '../prompt/learningAppendix';
 import { LearningStateService } from '../state/LearningStateService';
@@ -27,11 +22,7 @@ import type { LayoutPort } from '../ports/LayoutPort';
 import type { NoticePort } from '../ports/NoticePort';
 import type { VaultPort } from '../ports/VaultPort';
 import { LearningReadModel, type LearningConversationStatus } from './LearningReadModel';
-import { SourceLoader, sourcePathFromText, type LessonNoteSnippet, type SourceSnippet } from './SourceLoader';
-
-function actionNeedsQualityGate(action: LearningAction): action is Extract<LearningAction, { type: 'sectionNoteWritten' }> {
-  return action.type === 'sectionNoteWritten';
-}
+import { SourceLoader, type LessonNoteSnippet, type SourceSnippet } from './SourceLoader';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -54,22 +45,6 @@ function messagesHaveAssistantResponse(messages: unknown[] | undefined): boolean
   return Array.isArray(messages) && messages.some(messageLooksLikeAssistantResponse);
 }
 
-export interface LearningActionOutcome {
-  actionType: string;
-  label: string;
-  status: 'accepted' | 'rejected';
-  detail?: string;
-  message?: string;
-  items?: string[];
-  lessonPlan?: LearningLessonPlanContentBlock;
-}
-
-export interface LearningTurnCompletion {
-  repairPrompt: string | null;
-  actionOutcomes: LearningActionOutcome[];
-  nextSteps: LearningNextStepsContentBlock[];
-}
-
 export interface LearningServiceDependencies {
   adapter: VaultPort;
   layout: LayoutPort;
@@ -84,181 +59,6 @@ export interface LearningServiceDependencies {
   sourceLoader: SourceLoader;
 }
 
-function emptyLearningTurnCompletion(): LearningTurnCompletion {
-  return { repairPrompt: null, actionOutcomes: [], nextSteps: [] };
-}
-
-function describeLearningAction(action: LearningAction): Omit<LearningActionOutcome, 'status' | 'message'> {
-  switch (action.type) {
-    case 'generateSyllabus':
-      return {
-        actionType: action.type,
-        label: 'Save course map',
-        detail: action.topics.length > 0 ? `${action.topics.length} topics` : undefined,
-        items: action.topics.map((topic) => topic.title.trim()).filter(Boolean).slice(0, 8),
-      };
-    case 'planChapter': {
-      const title = action.title.trim() || 'current chapter';
-      return {
-        actionType: action.type,
-        label: 'Plan chapter',
-        detail: action.sections.length > 0 ? `${title} - ${action.sections.length} sections` : title,
-        items: action.sections.map((section) => section.title.trim()).filter(Boolean).slice(0, 8),
-      };
-    }
-    case 'sectionNoteWritten':
-      return {
-        actionType: action.type,
-        label: 'Register section note',
-        detail: action.noteTitle?.trim() || action.notePath,
-      };
-    case 'advanceSection':
-      return { actionType: action.type, label: 'Advance section' };
-    case 'startNewLesson':
-      return {
-        actionType: action.type,
-        label: 'Start new lesson',
-        detail: action.title?.trim() || undefined,
-        items: action.sections?.map((section) => section.title.trim()).filter(Boolean).slice(0, 8),
-      };
-    default:
-      return { actionType: action.type, label: 'Apply system update' };
-  }
-}
-
-function withAcceptedStateContext(
-  outcome: LearningActionOutcome,
-  action: LearningAction,
-  state: CourseState | undefined,
-): LearningActionOutcome {
-  if (!state) return outcome;
-  const currentLesson = state.lessons.find((lesson) => lesson.lessonId === state.currentLessonId);
-
-  if (action.type === 'advanceSection') {
-    if (state.machineState === 'chapterEnded') {
-      return {
-        ...outcome,
-        detail: 'Chapter complete',
-        message: 'Chapter finished. Start new lesson is ready.',
-      };
-    }
-
-    const section = currentLesson?.sections[currentLesson.currentSectionIndex];
-    if (!section) return outcome;
-    return {
-      ...outcome,
-      detail: `Next: ${section.title}`,
-      message: 'Next section started.',
-    };
-  }
-
-  if (action.type === 'startNewLesson' && currentLesson) {
-    return {
-      ...outcome,
-      detail: `Chapter ${currentLesson.chapterNumber}: ${currentLesson.title}`,
-      items: currentLesson.sections.map((section) => section.title).filter(Boolean).slice(0, 8),
-    };
-  }
-
-  return outcome;
-}
-
-function acceptedMessageForLearningAction(action: LearningAction): string {
-  switch (action.type) {
-    case 'generateSyllabus':
-      return 'Course map saved.';
-    case 'planChapter':
-      return 'Chapter plan saved.';
-    case 'sectionNoteWritten':
-      return 'Section note registered.';
-    case 'advanceSection':
-      return 'Next section started.';
-    case 'startNewLesson':
-      return 'New lesson conversation opened.';
-    default:
-      return 'System update saved.';
-  }
-}
-
-function toLearningActionBlock(outcome: LearningActionOutcome): LearningActionResultContentBlock {
-  return {
-    type: 'learning_action_result',
-    actionType: outcome.actionType,
-    label: outcome.label,
-    status: outcome.status,
-    detail: outcome.detail,
-    message: outcome.message,
-    items: outcome.items,
-  };
-}
-
-function learningActionOutcomeBlocks(outcomes: LearningActionOutcome[]): MessageUiBlock[] {
-  return outcomes.flatMap((outcome) => {
-    const blocks: MessageUiBlock[] = [toLearningActionBlock(outcome)];
-    if (outcome.lessonPlan) {
-      blocks.push(outcome.lessonPlan);
-    }
-    return blocks;
-  });
-}
-
-function formatPlanSource(source: unknown): string | LearningLessonPlanSource | null {
-  if (typeof source === 'string') {
-    const label = source.trim();
-    return label ? { label, path: sourcePathFromText(label) ?? undefined } : null;
-  }
-  if (!source || typeof source !== 'object') return null;
-  const value = source as { text?: unknown; cardId?: unknown; path?: unknown };
-  const path = typeof value.path === 'string' && value.path.trim()
-    ? value.path.trim()
-    : undefined;
-  const cardId = typeof value.cardId === 'string' && value.cardId.trim()
-    ? value.cardId.trim()
-    : undefined;
-  const label = typeof value.text === 'string' && value.text.trim()
-    ? value.text.trim()
-    : path ?? cardId ?? null;
-  if (!label) return null;
-  return { label, path, cardId };
-}
-
-function buildLessonPlanBlock(
-  action: LearningAction,
-  state: CourseState | undefined,
-): LearningLessonPlanContentBlock | undefined {
-  if (action.type !== 'planChapter' || !state) return undefined;
-  const lesson = state.lessons.find((item) => item.lessonId === state.currentLessonId);
-  const title = action.title.trim() || lesson?.title || 'Current chapter';
-  const parts = action.sections
-    .map((section, index) => {
-      const titleText = section.title.trim();
-      if (!titleText) return null;
-      const sources = section.sources
-        ?.map(formatPlanSource)
-        .filter((source): source is string | LearningLessonPlanSource => !!source)
-        .slice(0, 4);
-      return {
-        title: titleText,
-        status: index === 0 ? 'current' as const : 'pending' as const,
-        description: section.description?.trim() || undefined,
-        bulletPoints: section.bulletPoints?.map((point) => point.trim()).filter(Boolean).slice(0, 5),
-        sources: sources && sources.length > 0 ? sources : undefined,
-      };
-    })
-    .filter((part): part is NonNullable<typeof part> => !!part)
-    .slice(0, 8);
-  if (parts.length === 0) return undefined;
-
-  return {
-    type: 'learning_lesson_plan',
-    title,
-    overview: action.overview?.trim() || undefined,
-    detail: lesson ? `Chapter ${lesson.chapterNumber}` : undefined,
-    parts,
-    nextLessonSummary: action.nextLessonSummary?.trim() || undefined,
-  };
-}
-
 function learningActivity(
   label: string,
   detail?: string,
@@ -270,15 +70,6 @@ function learningActivity(
     status: 'running',
     detail,
     items: items?.map((item) => item.trim()).filter(Boolean).slice(0, 8),
-  };
-}
-
-function chapterReviewNextSteps(lesson: LessonSession): LearningNextStepsContentBlock {
-  return {
-    type: 'learning_next_steps',
-    label: 'Next',
-    detail: `Chapter ${lesson.chapterNumber} review complete`,
-    options: ['Start new lesson', '复盘本章', '我还有一个问题'],
   };
 }
 
@@ -585,7 +376,6 @@ export class LearningService {
   private readonly layout: LayoutPort;
   private readonly turns: LearningTurnPort;
   private readonly notice: NoticePort;
-  private readonly actionChannel = new ActionRequestChannel();
   private readonly contextInjector = new LearningContextInjector();
   private readonly qualityGate = new ContentQualityGate();
   private readonly transformationRegistry = new TransformationRegistry();
@@ -594,6 +384,7 @@ export class LearningService {
   private readonly sourceLoader: SourceLoader;
   private readonly navigationCoordinator: NavigationCoordinator;
   private readonly commandCoordinator: CommandCoordinator;
+  private readonly turnCoordinator: TurnCoordinator;
   private readonly conversationCache = new Map<string, LoadedLessonRef>();
   private readonly conversationTurnModes = new Map<string, LearningTurnMode>();
   private readonly readModel = new LearningReadModel(this.conversationCache, this.conversationTurnModes);
@@ -635,6 +426,23 @@ export class LearningService {
         openChatConversation: (conversationId) => this.openChatConversation(conversationId),
       },
       hasAssistantResponse: (conversationId) => this.hasConversationAssistantResponse(conversationId),
+    });
+    this.turnCoordinator = new TurnCoordinator({
+      stateService: this.stateService,
+      turns: this.turns,
+      notice: this.notice,
+      progression: this.progression,
+      readModel: this.readModel,
+      checkNoteQuality: (notePath) => this.checkNoteQuality(notePath),
+      buildRepairPrompt: (conversationId, notePath, reasons) => this.buildRepairPrompt(conversationId, notePath, reasons),
+      clearRepairAttempt: (conversationId, notePath) => this.repairAttempts.delete(this.repairKey(conversationId, notePath)),
+      cacheCourse: (course) => this.cacheCourse(course),
+      refreshOpenLearningViews: (courseId) => this.refreshOpenLearningViews(courseId),
+      openChatConversation: (conversationId) => this.openChatConversation(conversationId),
+      maybeKickoffPostAdvance: (conversationId, state) => this.maybeKickoffPostAdvance(conversationId, state),
+      maybeKickoffFirstLessonPlanning: (conversationId, state) => this.maybeKickoffFirstLessonPlanning(conversationId, state),
+      refreshConversationCache: () => this.refreshConversationCache(),
+      refreshOpenChatLearningControls: () => this.refreshOpenChatLearningControls(),
     });
   }
 
@@ -931,188 +739,7 @@ export class LearningService {
     assistantContent: string,
     assistantMessageId?: string,
   ): Promise<LearningTurnCompletion> {
-    const ref = await this.stateService.findByConversationId(conversationId);
-    if (!ref) return emptyLearningTurnCompletion();
-
-    const schemaCheck = await this.stateService.loadCourse(ref.course.courseId, ref.course.rootPath);
-    if (!schemaCheck) {
-      this.notice.notify('AI Tutor course-state.json is invalid or missing.');
-      return emptyLearningTurnCompletion();
-    }
-
-    const requests = this.actionChannel.parse(assistantContent);
-    if (requests.length === 0) {
-      const nextSteps = await this.persistReviewNextStepsIfNeeded(conversationId, assistantMessageId, ref.course, ref.lesson);
-      return { repairPrompt: null, actionOutcomes: [], nextSteps };
-    }
-
-    let latestState: CourseState | null = null;
-    let repairPrompt: string | null = null;
-    const actionOutcomes: LearningActionOutcome[] = [];
-    let shouldOpenStartedLesson = false;
-    let shouldKickoffFirstLessonPlanning = false;
-    let shouldKickoffAdvancedSection = false;
-    for (const request of requests) {
-      const actionSummary = describeLearningAction(request.action);
-      if (actionNeedsQualityGate(request.action)) {
-        const gate = await this.checkNoteQuality(request.action.notePath);
-        if (!gate.pass) {
-          this.notice.notify(`AI Tutor note quality gate failed: ${gate.reasons.join(' ')}`);
-          actionOutcomes.push({
-            ...actionSummary,
-            status: 'rejected',
-            message: `Quality gate failed: ${gate.reasons.join(' ')}`,
-          });
-          repairPrompt = this.buildRepairPrompt(conversationId, request.action.notePath, gate.reasons);
-          continue;
-        }
-        this.repairAttempts.delete(this.repairKey(conversationId, request.action.notePath));
-      }
-
-      const result = request.action.type === 'startNewLesson'
-        ? await this.progression.startNewLesson(ref.course.courseId, request.action, ref.lesson)
-        : request.action.type === 'advanceSection'
-          ? await this.progression.advanceSection(ref.course.courseId, request.action)
-          : await this.progression.applyAssistantAction(ref.course.courseId, request.action);
-
-      if (!result.ok) {
-        this.notice.notify(result.message ?? 'AI Tutor action was rejected.');
-        actionOutcomes.push({
-          ...actionSummary,
-          status: 'rejected',
-          message: result.message ?? 'Action rejected by state machine.',
-        });
-        continue;
-      }
-      const acceptedOutcome = withAcceptedStateContext({
-        ...actionSummary,
-        status: 'accepted',
-        message: acceptedMessageForLearningAction(request.action),
-      }, request.action, result.state);
-      actionOutcomes.push({
-        ...acceptedOutcome,
-        lessonPlan: buildLessonPlanBlock(request.action, result.state),
-      });
-      latestState = result.state ?? null;
-      if (request.action.type === 'startNewLesson') {
-        shouldOpenStartedLesson = true;
-      } else if (request.action.type === 'generateSyllabus') {
-        shouldKickoffFirstLessonPlanning = true;
-      } else if (request.action.type === 'advanceSection') {
-        shouldKickoffAdvancedSection = true;
-      } else if (request.action.type === 'planChapter') {
-        shouldKickoffAdvancedSection = true;
-      }
-    }
-
-    await this.persistActionOutcomes(conversationId, assistantMessageId, actionOutcomes);
-
-    if (latestState) {
-      this.cacheCourse(latestState);
-      await this.refreshOpenLearningViews(latestState.courseId);
-      const current = this.stateService.currentLesson(latestState);
-      if (shouldOpenStartedLesson && current) {
-        await this.openChatConversation(current.conversationId);
-      } else if (shouldKickoffAdvancedSection && !repairPrompt) {
-        await this.maybeKickoffPostAdvance(conversationId, latestState);
-      } else if (shouldKickoffFirstLessonPlanning && !repairPrompt) {
-        await this.maybeKickoffFirstLessonPlanning(conversationId, latestState);
-      }
-    } else {
-      await this.refreshConversationCache();
-    }
-    this.refreshOpenChatLearningControls();
-    return { repairPrompt, actionOutcomes, nextSteps: [] };
-  }
-
-  private async persistActionOutcomes(
-    conversationId: string,
-    assistantMessageId: string | undefined,
-    outcomes: LearningActionOutcome[],
-  ): Promise<void> {
-    if (!assistantMessageId || outcomes.length === 0) return;
-
-    const conversation = await this.turns.getConversation(conversationId);
-    if (!conversation) return;
-
-    const blocks = learningActionOutcomeBlocks(outcomes);
-    const existingBlocks = conversation.uiMessageBlocks?.[assistantMessageId] ?? [];
-    const preservedBlocks = existingBlocks.filter((block) => block.type !== 'learning_action_result' && block.type !== 'learning_lesson_plan');
-    const uiMessageBlocks: Record<string, MessageUiBlock[]> = {
-      ...(conversation.uiMessageBlocks ?? {}),
-      [assistantMessageId]: [...preservedBlocks, ...blocks],
-    };
-
-    const messages = conversation.messages.map((message) => {
-      if (message.id !== assistantMessageId) return message;
-      return {
-        ...message,
-        contentBlocks: [
-          ...(message.contentBlocks ?? []).filter(block => block.type !== 'learning_action_result' && block.type !== 'learning_lesson_plan'),
-          ...blocks,
-        ],
-      };
-    });
-
-    await this.turns.updateConversation(conversationId, {
-      messages,
-      uiMessageBlocks,
-    });
-  }
-
-  private async persistReviewNextStepsIfNeeded(
-    conversationId: string,
-    assistantMessageId: string | undefined,
-    course: CourseState,
-    lesson: LessonSession,
-  ): Promise<LearningNextStepsContentBlock[]> {
-    if (!assistantMessageId || !this.readModel.isReviewLessonReady({ course, lesson })) {
-      return [];
-    }
-
-    const conversation = await this.turns.getConversation(conversationId);
-    if (!conversation || !this.messageHasLearningActivity(conversation, assistantMessageId, 'Preparing chapter review')) {
-      return [];
-    }
-
-    const block = chapterReviewNextSteps(lesson);
-    const existingBlocks = conversation.uiMessageBlocks?.[assistantMessageId] ?? [];
-    const preservedBlocks = existingBlocks.filter((candidate) => candidate.type !== 'learning_next_steps');
-    const uiMessageBlocks: Record<string, MessageUiBlock[]> = {
-      ...(conversation.uiMessageBlocks ?? {}),
-      [assistantMessageId]: [...preservedBlocks, block],
-    };
-
-    const messages = conversation.messages.map((message) => {
-      if (message.id !== assistantMessageId) return message;
-      return {
-        ...message,
-        contentBlocks: [
-          ...(message.contentBlocks ?? []).filter(candidate => candidate.type !== 'learning_next_steps'),
-          block,
-        ],
-      };
-    });
-
-    await this.turns.updateConversation(conversationId, {
-      messages,
-      uiMessageBlocks,
-    });
-    return [block];
-  }
-
-  private messageHasLearningActivity(
-    conversation: Conversation,
-    messageId: string,
-    label: string,
-  ): boolean {
-    const uiBlocks = conversation.uiMessageBlocks?.[messageId] ?? [];
-    if (uiBlocks.some((block) => block.type === 'learning_activity' && block.label === label)) {
-      return true;
-    }
-
-    const message = conversation.messages.find((candidate) => candidate.id === messageId);
-    return message?.contentBlocks?.some((block) => block.type === 'learning_activity' && block.label === label) ?? false;
+    return this.turnCoordinator.handleAssistantTurnComplete(conversationId, assistantContent, assistantMessageId);
   }
 
   async openNote(path: string): Promise<void> {
