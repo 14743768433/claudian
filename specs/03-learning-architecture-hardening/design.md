@@ -1,6 +1,6 @@
 # Stage 03 Design: 学习域严格分层硬化
 
-状态：active
+状态：implemented；manual Obsidian smoke pending
 
 ## 分层模型（Hexagonal + Dependency Rule）
 

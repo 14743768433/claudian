@@ -1,6 +1,6 @@
 # Stage 03 Research: 学习域严格分层硬化
 
-状态：active
+状态：implemented；manual Obsidian smoke pending
 日期：2026-06-27
 实现仓：`D:\claudian`（fork 分支 `codex/learning-tutor-fork`）
 
