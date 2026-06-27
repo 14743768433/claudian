@@ -14,6 +14,7 @@ import type {
 import type { ChatTurnRequest } from '../../core/runtime/types';
 import type ClaudianPlugin from '../../main';
 import { revealWorkspaceLeaf } from '../../utils/obsidianCompat';
+import { ObsidianNoticeAdapter } from './adapters/ObsidianNoticeAdapter';
 import { ContentQualityGate } from './content/ContentQualityGate';
 import { SkillSeeder } from './content/SkillSeeder';
 import { TransformationRegistry } from './content/TransformationRegistry';
@@ -708,6 +709,7 @@ export class LearningController {
       plugin,
       this.stateMachine,
       new SummaryService(plugin),
+      new ObsidianNoticeAdapter(),
     );
     this.skillSeeder = new SkillSeeder(this.adapter);
   }

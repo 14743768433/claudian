@@ -1,4 +1,3 @@
-import { VaultFileAdapter } from '../../../core/storage/VaultFileAdapter';
 import { basenameFromPath, normalizeLearningPath, slugifyCourseTitle } from './path';
 import { LearningPluginIndex } from './LearningPluginIndex';
 import {
@@ -13,6 +12,12 @@ import {
   LoadedLessonRef,
   SectionStatus,
 } from './types';
+
+interface LearningStateFileAccess {
+  exists(path: string): Promise<boolean>;
+  read(path: string): Promise<string>;
+  write(path: string, content: string): Promise<void>;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -108,7 +113,7 @@ function validateCourseState(value: unknown): CourseState | null {
 
 export class LearningStateService {
   constructor(
-    private readonly adapter: VaultFileAdapter,
+    private readonly adapter: LearningStateFileAccess,
     private readonly index: LearningPluginIndex,
   ) {}
 

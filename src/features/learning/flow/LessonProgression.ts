@@ -1,6 +1,5 @@
-import { Notice } from 'obsidian';
-
 import type ClaudianPlugin from '../../../main';
+import type { NoticePort } from '../ports/NoticePort';
 import { LearningStateMachine } from './LearningStateMachine';
 import { SummaryService } from './SummaryService';
 import type { LearningAction, LearningActionResult, LessonSession } from '../state/types';
@@ -10,6 +9,7 @@ export class LessonProgression {
     private readonly plugin: ClaudianPlugin,
     private readonly machine: LearningStateMachine,
     private readonly summaryService: SummaryService,
+    private readonly notice: NoticePort = { notify: () => {} },
   ) {}
 
   async applyAssistantAction(courseId: string, action: LearningAction): Promise<LearningActionResult> {
@@ -26,7 +26,7 @@ export class LessonProgression {
   ): Promise<LearningActionResult> {
     const result = await this.machine.applyAction(courseId, action);
     if (result.ok) {
-      new Notice(result.state?.machineState === 'chapterEnded'
+      this.notice.notify(result.state?.machineState === 'chapterEnded'
         ? 'AI Tutor finished this chapter.'
         : 'AI Tutor continued to the next section.');
     }
@@ -65,7 +65,7 @@ export class LessonProgression {
         await plugin.renameConversation?.(conversation.id, `${result.state?.title} · ${currentLesson.title}`)
           .catch(() => {});
       }
-      new Notice('Started a new AI Tutor lesson.');
+      this.notice.notify('Started a new AI Tutor lesson.');
     }
 
     return result;
