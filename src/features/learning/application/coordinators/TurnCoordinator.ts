@@ -6,10 +6,12 @@ import type {
   LearningNextStepsContentBlock,
   MessageUiBlock,
 } from '../../../../core/types';
+import type { ChatTurnRequest } from '../../../../core/runtime/types';
 import { ActionRequestChannel } from '../ActionRequestChannel';
+import { LearningContextInjector } from '../../context/LearningContextInjector';
 import type { LearningTurnPort } from '../../ports/LearningTurnPort';
 import type { NoticePort } from '../../ports/NoticePort';
-import type { CourseState, LearningAction, LessonSession, LoadedLessonRef } from '../../state/types';
+import type { CourseState, LearningAction, LearningTurnMode, LessonSession, LoadedLessonRef } from '../../state/types';
 import { sourcePathFromText } from '../SourceLoader';
 import type { LessonProgression } from './LessonProgression';
 
@@ -55,6 +57,8 @@ export interface TurnCoordinatorDependencies {
   maybeKickoffFirstLessonPlanning(conversationId: string, state: CourseState): Promise<void>;
   refreshConversationCache(): Promise<void>;
   refreshOpenChatLearningControls(): void;
+  getLoadedLessonRefSync(conversationId: string): LoadedLessonRef | null;
+  getConversationTurnMode(conversationId: string): LearningTurnMode;
 }
 
 function actionNeedsQualityGate(action: LearningAction): action is Extract<LearningAction, { type: 'sectionNoteWritten' }> {
@@ -247,8 +251,26 @@ function chapterReviewNextSteps(lesson: LessonSession): LearningNextStepsContent
 
 export class TurnCoordinator {
   private readonly actionChannel = new ActionRequestChannel();
+  private readonly contextInjector = new LearningContextInjector();
 
   constructor(private readonly deps: TurnCoordinatorDependencies) {}
+
+  decorateTurnRequestSync(
+    conversationId: string | null,
+    request: ChatTurnRequest,
+    conversationMessageCount: number,
+  ): ChatTurnRequest {
+    if (!conversationId) return request;
+    const ref = this.deps.getLoadedLessonRefSync(conversationId);
+    if (!ref) return request;
+    return this.contextInjector.decorateRequest({
+      course: ref.course,
+      lesson: ref.lesson,
+      conversationMessageCount,
+      request,
+      selectedTurnMode: this.deps.getConversationTurnMode(conversationId),
+    });
+  }
 
   async handleAssistantTurnComplete(
     conversationId: string,

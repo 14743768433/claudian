@@ -6,7 +6,6 @@ import type { ChatTurnRequest } from '../../../core/runtime/types';
 import { ContentQualityGate } from '../content/ContentQualityGate';
 import { SkillSeeder } from '../content/SkillSeeder';
 import { TransformationRegistry } from '../content/TransformationRegistry';
-import { LearningContextInjector } from '../context/LearningContextInjector';
 import { CommandCoordinator } from './coordinators/CommandCoordinator';
 import { LessonProgression } from './coordinators/LessonProgression';
 import { NavigationCoordinator } from './coordinators/NavigationCoordinator';
@@ -376,7 +375,6 @@ export class LearningService {
   private readonly layout: LayoutPort;
   private readonly turns: LearningTurnPort;
   private readonly notice: NoticePort;
-  private readonly contextInjector = new LearningContextInjector();
   private readonly qualityGate = new ContentQualityGate();
   private readonly transformationRegistry = new TransformationRegistry();
   private readonly progression: LessonProgression;
@@ -443,6 +441,8 @@ export class LearningService {
       maybeKickoffFirstLessonPlanning: (conversationId, state) => this.maybeKickoffFirstLessonPlanning(conversationId, state),
       refreshConversationCache: () => this.refreshConversationCache(),
       refreshOpenChatLearningControls: () => this.refreshOpenChatLearningControls(),
+      getLoadedLessonRefSync: (conversationId) => this.conversationCache.get(conversationId) ?? null,
+      getConversationTurnMode: (conversationId) => this.getConversationTurnMode(conversationId),
     });
   }
 
@@ -722,16 +722,7 @@ export class LearningService {
     request: ChatTurnRequest,
     conversationMessageCount: number,
   ): ChatTurnRequest {
-    if (!conversationId) return request;
-    const ref = this.conversationCache.get(conversationId);
-    if (!ref) return request;
-    return this.contextInjector.decorateRequest({
-      course: ref.course,
-      lesson: ref.lesson,
-      conversationMessageCount,
-      request,
-      selectedTurnMode: this.getConversationTurnMode(conversationId),
-    });
+    return this.turnCoordinator.decorateTurnRequestSync(conversationId, request, conversationMessageCount);
   }
 
   async handleAssistantTurnComplete(
