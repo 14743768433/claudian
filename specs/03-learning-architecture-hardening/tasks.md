@@ -48,6 +48,7 @@
 ## Phase 5 — 强制与收尾
 - [x] 把 `.dependency-cruiser.cjs` 规则逐条从 `warn` 升 `error`，修到 **0 violation**。
 - [x] `npm run depcruise` 接入 CI / 与 typecheck 并列。
+- [x] `npm run learning:architecture-audit` 接入 `verify`，硬性检查五层目录、旧入口残留、非法 Obsidian import、绕过 `StateTransitionService` 的 `.saveCourse()`。
 - [ ] （可选）加 `eslint-plugin-boundaries` strict 供 IDE 即时报错。
 - [x] `grep "from 'obsidian'"` 仅命中 `adapters/**` `views/**`。
 - [x] `npm test`（全量）+ `typecheck` + `build` 全绿。

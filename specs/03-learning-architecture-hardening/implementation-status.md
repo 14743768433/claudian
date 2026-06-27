@@ -11,6 +11,7 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 
 - Baseline commits and Stage 03 tooling are in git history.
 - `dependency-cruiser` is installed, `npm run depcruise` is configured, and rules run with `severity: "error"`.
+- `npm run learning:architecture-audit` is configured and included in `npm run verify`; it fails on legacy learning entrypoint imports, wrong top-level learning directories, illegal learning Obsidian imports, and `.saveCourse()` calls outside `StateTransitionService`.
 - `npm run verify` passes locally: depcruise, typecheck, full Jest, build.
 - Learning ports and adapters exist: `StatePort`, `VaultPort`, `LayoutPort`, `NoticePort`, `LearningTurnPort`; `ObsidianVaultAdapter`, `ObsidianLayoutAdapter`, `ObsidianNoticeAdapter`, `ClaudianTurnAdapter`, `FileStateAdapter`.
 - `LearningController` is a composition root facade. Current baseline reports about 50 lines versus Phase 0 baseline 1898.
@@ -29,6 +30,7 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 ## Current Evidence
 
 - `npm run depcruise`: passed, 0 violations.
+- `npm run learning:architecture-audit`: passed.
 - `npm run typecheck`: passed.
 - `npm test`: passed, 245 suites / 5852 tests.
 - `npm run build`: passed.
