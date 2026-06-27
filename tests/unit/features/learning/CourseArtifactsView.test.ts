@@ -1,4 +1,5 @@
 import { createMockEl } from '@test/helpers/mockElement';
+import { MarkdownRenderer } from 'obsidian';
 
 import type { LearningLessonPlanContentBlock } from '@/core/types';
 import { CourseArtifactsView } from '@/features/learning/views/CourseArtifactsView';
@@ -63,6 +64,10 @@ function createView(plugin: any, contentEl = createMockEl()) {
 }
 
 describe('CourseArtifactsView', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   it('renders lesson plan metadata from conversation UI blocks in the right outline', async () => {
     const openNote = jest.fn();
     const openSource = jest.fn();
@@ -119,5 +124,64 @@ describe('CourseArtifactsView', () => {
 
     expect(contentEl.querySelectorAll('.ai-tutor-artifact-row')).toHaveLength(2);
     expect(contentEl.querySelector('.ai-tutor-artifact-title')?.textContent).toBe('Low-pass intuition');
+  });
+
+  it('renders selected section note content and reference material in the right rail', async () => {
+    const noteMarkdown = '# Low-pass intuition\n\nThis is the full generated note content.';
+    const sourceMarkdown = '# Filter notes\n\nThis is the source material content.';
+    const plugin = {
+      app: {},
+      learningController: {
+        loadCourse: jest.fn(async () => makeCourse()),
+        openNote: jest.fn(),
+        openSource: jest.fn(),
+        loadLessonNoteContent: jest.fn(async () => ({
+          label: 'Low-pass intuition',
+          path: 'filters/low-pass.md',
+          text: noteMarkdown,
+        })),
+        loadSourceContent: jest.fn(async () => ({
+          label: 'Filter notes',
+          path: 'sources/filter-notes.md',
+          text: sourceMarkdown,
+        })),
+      },
+      getConversationSync: jest.fn(() => ({
+        id: 'conv-1',
+        uiMessageBlocks: {
+          'assistant-1': [makePlan()],
+        },
+        messages: [],
+      })),
+      getConversationById: jest.fn(),
+    };
+    const { view, contentEl } = createView(plugin);
+
+    await view.render();
+
+    expect(plugin.learningController.loadLessonNoteContent).toHaveBeenCalledWith(
+      'filters/low-pass.md',
+      'Low-pass intuition',
+    );
+    expect(plugin.learningController.loadSourceContent).toHaveBeenCalledWith({
+      label: 'Filter notes',
+      path: 'sources/filter-notes.md',
+    });
+    expect(MarkdownRenderer.render).toHaveBeenCalledWith(
+      plugin.app,
+      noteMarkdown,
+      expect.anything(),
+      'filters/low-pass.md',
+      view,
+    );
+    expect(MarkdownRenderer.render).toHaveBeenCalledWith(
+      plugin.app,
+      sourceMarkdown,
+      expect.anything(),
+      'sources/filter-notes.md',
+      view,
+    );
+    expect(contentEl.querySelector('.ai-tutor-material-section-title')?.textContent).toBe('笔记内容');
+    expect(contentEl.querySelector('.ai-tutor-reference-title')?.textContent).toBe('Filter notes');
   });
 });

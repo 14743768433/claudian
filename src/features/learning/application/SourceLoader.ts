@@ -122,6 +122,43 @@ export class SourceLoader {
     return snippets;
   }
 
+  async loadLessonNoteContent(path: string, label: string): Promise<LessonNoteSnippet | null> {
+    const trimmedPath = path.trim();
+    if (!trimmedPath) return null;
+
+    try {
+      if (!(await this.vault.exists(trimmedPath))) return null;
+      const text = this.normalizeMarkdown(await this.vault.read(trimmedPath));
+      if (!text) return null;
+      return {
+        label: label.trim() || trimmedPath,
+        path: trimmedPath,
+        text,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async loadSourceContent(
+    source: string | LearningLessonPlanSource,
+  ): Promise<SourceSnippet | null> {
+    const path = this.resolveSourcePath(source);
+    if (!path) return null;
+
+    const resolvedPath = await this.resolveSourceVaultPath(path);
+    if (!resolvedPath) return null;
+
+    const text = await this.readSourceFile(resolvedPath);
+    if (!text) return null;
+
+    return {
+      label: typeof source === 'string' ? source.trim() : source.label.trim(),
+      path: resolvedPath,
+      text,
+    };
+  }
+
   async resolveSourceVaultPath(path: string): Promise<string | null> {
     const trimmed = path.trim();
     if (!trimmed) return null;
@@ -155,19 +192,31 @@ export class SourceLoader {
     return sourcePathFromText(label);
   }
 
-  private async readSourceFileSnippet(path: string): Promise<string> {
+  private async readSourceFileSnippet(path: string, maxChars = 2400): Promise<string> {
     try {
-      return await this.vault.boundedRead(path, 2400) ?? '';
+      return this.compactSourceSnippet(await this.vault.boundedRead(path, maxChars) ?? '', maxChars);
     } catch {
       return '';
     }
   }
 
-  private compactSourceSnippet(markdown: string): string {
+  private async readSourceFile(path: string): Promise<string> {
+    try {
+      return this.normalizeMarkdown(await this.vault.read(path));
+    } catch {
+      return '';
+    }
+  }
+
+  private compactSourceSnippet(markdown: string, maxChars = 2400): string {
+    return this.normalizeMarkdown(markdown)
+      .slice(0, maxChars);
+  }
+
+  private normalizeMarkdown(markdown: string): string {
     return markdown
       .replace(/\r\n/g, '\n')
       .replace(/\n{4,}/g, '\n\n\n')
-      .trim()
-      .slice(0, 2400);
+      .trim();
   }
 }

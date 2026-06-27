@@ -595,6 +595,14 @@ export class LearningService {
     await this.navigationCoordinator.openSource(source);
   }
 
+  async loadLessonNoteContent(path: string, label: string): Promise<LessonNoteSnippet | null> {
+    return this.sourceLoader.loadLessonNoteContent(path, label);
+  }
+
+  async loadSourceContent(source: string | LearningLessonPlanSource): Promise<SourceSnippet | null> {
+    return this.sourceLoader.loadSourceContent(source);
+  }
+
   async handleVaultRename(oldPath: string, newPath: string): Promise<void> {
     for (const course of await this.stateService.listCourses()) {
       const result = await this.stateMachine.applyAction(course.courseId, {
