@@ -1588,6 +1588,7 @@ describe('LearningController lesson controls', () => {
       createdAt: 1,
       updatedAt: 1,
     };
+    const sendMessage = jest.fn(async (_options?: { content?: string; displayContent?: string; hideUserMessage?: boolean; learningActivity?: unknown }) => undefined);
     const plugin = {
       app: {
         vault: { adapter: {} },
@@ -1595,15 +1596,26 @@ describe('LearningController lesson controls', () => {
       },
       loadData: jest.fn(async () => ({})),
       saveData: jest.fn(),
-      getAllViews: jest.fn(() => []),
+      getAllViews: jest.fn(() => [{
+        refreshLearningControls: jest.fn(),
+        getTabManager: () => ({
+          getAllTabs: () => [{
+            id: 'tab-1',
+            conversationId: 'conv-1',
+            state: { isStreaming: false, messages: [{ role: 'assistant' }] },
+            controllers: { inputController: { sendMessage } },
+          }],
+          switchToTab: jest.fn(async () => undefined),
+        }),
+      }]),
     };
     const controller = new LearningController(plugin as any);
     jest.spyOn(controller.stateService, 'findByConversationId').mockResolvedValue({ course, lesson });
-    const writeNote = jest.spyOn(controller, 'writeSectionNoteFromConversation').mockResolvedValue(undefined);
 
     await expect(controller.handleUserCommand('conv-1', '生成本节笔记')).resolves.toBe(true);
 
-    expect(writeNote).toHaveBeenCalledWith('conv-1');
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0][0]?.displayContent).toBe('生成本节笔记：Low-pass intuition');
   });
 
   it('routes short practice text commands through the practice action', async () => {
@@ -1632,6 +1644,7 @@ describe('LearningController lesson controls', () => {
       createdAt: 1,
       updatedAt: 1,
     };
+    const sendMessage = jest.fn(async (_options?: { content?: string; displayContent?: string; hideUserMessage?: boolean; learningActivity?: unknown }) => undefined);
     const plugin = {
       app: {
         vault: { adapter: {} },
@@ -1639,15 +1652,26 @@ describe('LearningController lesson controls', () => {
       },
       loadData: jest.fn(async () => ({})),
       saveData: jest.fn(),
-      getAllViews: jest.fn(() => []),
+      getAllViews: jest.fn(() => [{
+        refreshLearningControls: jest.fn(),
+        getTabManager: () => ({
+          getAllTabs: () => [{
+            id: 'tab-1',
+            conversationId: 'conv-1',
+            state: { isStreaming: false, messages: [{ role: 'assistant' }] },
+            controllers: { inputController: { sendMessage } },
+          }],
+          switchToTab: jest.fn(async () => undefined),
+        }),
+      }]),
     };
     const controller = new LearningController(plugin as any);
     jest.spyOn(controller.stateService, 'findByConversationId').mockResolvedValue({ course, lesson });
-    const practice = jest.spyOn(controller, 'practiceSectionFromConversation').mockResolvedValue(undefined);
 
     await expect(controller.handleUserCommand('conv-1', '做一个小测')).resolves.toBe(true);
 
-    expect(practice).toHaveBeenCalledWith('conv-1');
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0][0]?.displayContent).toBe('小测：Low-pass intuition');
   });
 
   it('starts a hidden note-grounded chapter review turn for a finished chapter', async () => {
@@ -1851,22 +1875,39 @@ describe('LearningController lesson controls', () => {
       createdAt: 1,
       updatedAt: 3,
     };
+    const sendMessage = jest.fn(async (_options?: { content?: string; displayContent?: string; hideUserMessage?: boolean; learningActivity?: unknown }) => undefined);
     const plugin = {
       app: {
-        vault: { adapter: {} },
+        vault: {
+          adapter: {
+            exists: jest.fn(async () => false),
+            read: jest.fn(async () => ''),
+          },
+        },
         workspace: { getLeavesOfType: jest.fn(() => []) },
       },
       loadData: jest.fn(async () => ({})),
       saveData: jest.fn(),
-      getAllViews: jest.fn(() => []),
+      getAllViews: jest.fn(() => [{
+        refreshLearningControls: jest.fn(),
+        getTabManager: () => ({
+          getAllTabs: () => [{
+            id: 'tab-2',
+            conversationId: 'conv-2',
+            state: { isStreaming: false, messages: [{ role: 'assistant' }] },
+            controllers: { inputController: { sendMessage } },
+          }],
+          switchToTab: jest.fn(async () => undefined),
+        }),
+      }]),
     };
     const controller = new LearningController(plugin as any);
     jest.spyOn(controller.stateService, 'findByConversationId').mockResolvedValue({ course, lesson });
-    const review = jest.spyOn(controller, 'reviewLessonFromConversation').mockResolvedValue(undefined);
 
     await expect(controller.handleUserCommand('conv-2', '复盘本章')).resolves.toBe(true);
 
-    expect(review).toHaveBeenCalledWith('conv-2');
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0][0]?.displayContent).toBe('复盘本章：Endurance base');
   });
 
   it('opens vault-backed lesson plan sources from structured source refs', async () => {
@@ -2412,9 +2453,27 @@ describe('LearningController lesson controls', () => {
     const updateConversation = jest.fn(async (_id: string, updates: Record<string, unknown>) => {
       Object.assign(conversation, updates);
     });
+    const noteMarkdown = [
+      '# Low-pass intuition',
+      '## Why this matters',
+      'A low-pass filter keeps the slow part of a signal and reduces fast noise. You can imagine it like a heavy door closer: slow movement passes smoothly, but sudden shaking is damped before it dominates the room.',
+      '## Mechanism',
+      'Use 3 checks: input frequency, cutoff frequency, and output amplitude. If the signal is below 100 Hz, it mostly passes; if it is far above 100 Hz, the output should shrink.',
+      '## Example',
+      'In a sensor pipeline with 1 noisy channel and 60 samples per second, the filter preserves the trend while suppressing quick spikes. This gives a concrete way to compare raw and filtered traces.',
+      '## Check Yourself',
+      'Check Yourself: explain why a slow trend should remain visible, then name 2 cases where filtering could hide useful information. Review the example and mark which part is signal and which part is noise.',
+      '## Review bridge',
+      'Review this note after one practice problem and compare the answer with the 3 checks above.',
+    ].join('\n\n');
     const plugin = {
       app: {
-        vault: { adapter: {} },
+        vault: {
+          adapter: {
+            exists: jest.fn(async (path: string) => path === 'AI Tutor/Courses/signals/s1.md'),
+            read: jest.fn(async () => noteMarkdown),
+          },
+        },
         workspace: { getLeavesOfType: jest.fn(() => []) },
       },
       loadData: jest.fn(async () => ({})),
@@ -2426,7 +2485,6 @@ describe('LearningController lesson controls', () => {
     const controller = new LearningController(plugin as any);
     jest.spyOn(controller.stateService, 'findByConversationId').mockResolvedValue({ course, lesson });
     jest.spyOn(controller.stateService, 'loadCourse').mockResolvedValue(course);
-    jest.spyOn(controller as any, 'checkNoteQuality').mockResolvedValue({ pass: true, reasons: [] });
     jest.spyOn((controller as any).progression, 'applyAssistantAction')
       .mockResolvedValue({ ok: true, state: course });
 

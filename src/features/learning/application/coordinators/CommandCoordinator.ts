@@ -1,25 +1,36 @@
-import type { LoadedLessonRef } from '../../state/types';
+import type { NoticePort } from '../../ports/NoticePort';
+import type { CourseState, LessonSession, LoadedLessonRef } from '../../state/types';
+import type { LessonProgression } from './LessonProgression';
 
 export interface LearningCommandCourseLookup {
   findByConversationId(conversationId: string): Promise<LoadedLessonRef | null>;
+  currentLesson(course: CourseState): LessonSession | null;
 }
 
 export interface LearningCommandReadModel {
   isCurrentLessonWaitingForKickoff(ref: LoadedLessonRef): boolean;
+  isWriteSectionNoteReady(ref: LoadedLessonRef): boolean;
+  isPracticeSectionReady(ref: LoadedLessonRef): boolean;
+  isReviewLessonReady(ref: LoadedLessonRef): boolean;
+  isStartNewLessonReady(ref: LoadedLessonRef): boolean;
 }
 
 export interface LearningCommandActions {
-  advanceSectionFromConversation(conversationId: string): Promise<void>;
-  writeSectionNoteFromConversation(conversationId: string): Promise<void>;
-  practiceSectionFromConversation(conversationId: string): Promise<void>;
-  reviewLessonFromConversation(conversationId: string): Promise<void>;
-  startNewLessonFromConversation(conversationId: string, options?: { force?: boolean }): Promise<void>;
+  cacheCourse(course: CourseState): void;
+  refreshOpenLearningViews(courseId: string): Promise<void>;
+  refreshOpenChatLearningControls(): void;
+  maybeKickoffPostAdvance(conversationId: string, state: CourseState): Promise<void>;
   openChatConversation(conversationId: string): Promise<void>;
+  sendSectionNoteTurn(conversationId: string, ref: LoadedLessonRef): Promise<boolean>;
+  sendSectionPracticeTurn(conversationId: string, ref: LoadedLessonRef): Promise<boolean>;
+  sendLessonReviewTurn(conversationId: string, course: CourseState, lesson: LessonSession): Promise<boolean>;
 }
 
 export interface CommandCoordinatorDependencies {
   courseLookup: LearningCommandCourseLookup;
   readModel: LearningCommandReadModel;
+  progression: LessonProgression;
+  notice: NoticePort;
   actions: LearningCommandActions;
   hasAssistantResponse(conversationId: string): Promise<boolean>;
 }
@@ -64,22 +75,22 @@ export class CommandCoordinator {
     }
 
     if (isAdvanceSectionCommand(text)) {
-      await this.deps.actions.advanceSectionFromConversation(conversationId);
+      await this.advanceSectionFromConversation(conversationId);
       return true;
     }
 
     if (isWriteSectionNoteCommand(text)) {
-      await this.deps.actions.writeSectionNoteFromConversation(conversationId);
+      await this.writeSectionNoteFromConversation(conversationId);
       return true;
     }
 
     if (isPracticeSectionCommand(text)) {
-      await this.deps.actions.practiceSectionFromConversation(conversationId);
+      await this.practiceSectionFromConversation(conversationId);
       return true;
     }
 
     if (isReviewLessonCommand(text)) {
-      await this.deps.actions.reviewLessonFromConversation(conversationId);
+      await this.reviewLessonFromConversation(conversationId);
       return true;
     }
 
@@ -91,10 +102,123 @@ export class CommandCoordinator {
         await this.deps.actions.openChatConversation(ref.lesson.conversationId);
         return true;
       }
-      await this.deps.actions.startNewLessonFromConversation(conversationId, { force: true });
+      await this.startNewLessonFromConversation(conversationId, { force: true });
       return true;
     }
 
     return false;
+  }
+
+  async advanceSectionFromConversation(conversationId: string): Promise<void> {
+    const ref = await this.requireRef(conversationId);
+    if (!ref) return;
+
+    const result = await this.deps.progression.advanceSection(ref.course.courseId);
+    if (!result.ok || !result.state) {
+      this.deps.notice.notify(result.message ?? 'AI Tutor could not continue to the next section.');
+      this.deps.actions.refreshOpenChatLearningControls();
+      return;
+    }
+
+    this.deps.actions.cacheCourse(result.state);
+    await this.deps.actions.refreshOpenLearningViews(result.state.courseId);
+    this.deps.actions.refreshOpenChatLearningControls();
+    await this.deps.actions.maybeKickoffPostAdvance(conversationId, result.state);
+  }
+
+  async writeSectionNoteFromConversation(conversationId: string): Promise<void> {
+    const ref = await this.requireRef(conversationId);
+    if (!ref) return;
+
+    if (!this.deps.readModel.isWriteSectionNoteReady(ref)) {
+      this.deps.notice.notify('AI Tutor can only write a note for the current pending section.');
+      this.deps.actions.refreshOpenChatLearningControls();
+      return;
+    }
+
+    if (!await this.deps.actions.sendSectionNoteTurn(conversationId, ref)) {
+      this.deps.notice.notify('AI Tutor is already working. Try writing the note after the current turn finishes.');
+      this.deps.actions.refreshOpenChatLearningControls();
+    }
+  }
+
+  async practiceSectionFromConversation(conversationId: string): Promise<void> {
+    const ref = await this.requireRef(conversationId);
+    if (!ref) return;
+
+    if (!this.deps.readModel.isPracticeSectionReady(ref)) {
+      this.deps.notice.notify('AI Tutor can only practice the current active section.');
+      this.deps.actions.refreshOpenChatLearningControls();
+      return;
+    }
+
+    if (!await this.deps.actions.sendSectionPracticeTurn(conversationId, ref)) {
+      this.deps.notice.notify('AI Tutor is already working. Try the practice check after the current turn finishes.');
+      this.deps.actions.refreshOpenChatLearningControls();
+    }
+  }
+
+  async reviewLessonFromConversation(conversationId: string): Promise<void> {
+    const ref = await this.requireRef(conversationId);
+    if (!ref) return;
+
+    if (!this.deps.readModel.isReviewLessonReady(ref)) {
+      this.deps.notice.notify('AI Tutor can only review a chapter after it is finished.');
+      this.deps.actions.refreshOpenChatLearningControls();
+      return;
+    }
+
+    if (!await this.deps.actions.sendLessonReviewTurn(conversationId, ref.course, ref.lesson)) {
+      this.deps.notice.notify('AI Tutor is already working. Try the chapter review after the current turn finishes.');
+      this.deps.actions.refreshOpenChatLearningControls();
+    }
+  }
+
+  async startNewLessonFromConversation(
+    conversationId: string,
+    options: { force?: boolean } = {},
+  ): Promise<void> {
+    const ref = await this.requireRef(conversationId);
+    if (!ref) return;
+
+    if (!options.force && !this.deps.readModel.isStartNewLessonReady(ref)) {
+      this.deps.notice.notify('Finish and cover every section before starting a new lesson.');
+      this.deps.actions.refreshOpenChatLearningControls();
+      return;
+    }
+
+    const result = await this.deps.progression.startNewLesson(
+      ref.course.courseId,
+      options.force === true
+        ? { type: 'startNewLesson', force: true }
+        : { type: 'startNewLesson' },
+      ref.lesson,
+    );
+
+    if (!result.ok || !result.state) {
+      this.deps.notice.notify(result.message ?? 'AI Tutor could not start a new lesson.');
+      this.deps.actions.refreshOpenChatLearningControls();
+      return;
+    }
+
+    this.deps.actions.cacheCourse(result.state);
+    await this.deps.actions.refreshOpenLearningViews(result.state.courseId);
+    const current = this.deps.courseLookup.currentLesson(result.state);
+    if (current) {
+      await this.deps.actions.openChatConversation(current.conversationId);
+    } else {
+      this.deps.actions.refreshOpenChatLearningControls();
+    }
+  }
+
+  private async requireRef(conversationId: string): Promise<LoadedLessonRef | null> {
+    const ref = await this.deps.courseLookup.findByConversationId(conversationId);
+    if (!ref) {
+      this.deps.notice.notify('AI Tutor could not find a course for this conversation.');
+      this.deps.actions.refreshOpenChatLearningControls();
+      return null;
+    }
+    this.deps.actions.cacheCourse(ref.course);
+    return ref;
   }
 }

@@ -3,7 +3,6 @@ import type {
   LearningLessonPlanSource,
 } from '../../../core/types';
 import type { ChatTurnRequest } from '../../../core/runtime/types';
-import { ContentQualityGate } from '../content/ContentQualityGate';
 import { SkillSeeder } from '../content/SkillSeeder';
 import { TransformationRegistry } from '../content/TransformationRegistry';
 import { CommandCoordinator } from './coordinators/CommandCoordinator';
@@ -375,7 +374,6 @@ export class LearningService {
   private readonly layout: LayoutPort;
   private readonly turns: LearningTurnPort;
   private readonly notice: NoticePort;
-  private readonly qualityGate = new ContentQualityGate();
   private readonly transformationRegistry = new TransformationRegistry();
   private readonly progression: LessonProgression;
   private readonly skillSeeder: SkillSeeder;
@@ -387,8 +385,6 @@ export class LearningService {
   private readonly conversationTurnModes = new Map<string, LearningTurnMode>();
   private readonly readModel = new LearningReadModel(this.conversationCache, this.conversationTurnModes);
   private readonly lessonKickoffsInFlight = new Set<string>();
-  private readonly repairAttempts = new Map<string, number>();
-  private readonly maxRepairAttempts = 2;
 
   constructor(deps: LearningServiceDependencies) {
     this.adapter = deps.adapter;
@@ -415,25 +411,27 @@ export class LearningService {
     this.commandCoordinator = new CommandCoordinator({
       courseLookup: this.stateService,
       readModel: this.readModel,
+      progression: this.progression,
+      notice: this.notice,
       actions: {
-        advanceSectionFromConversation: (conversationId) => this.advanceSectionFromConversation(conversationId),
-        writeSectionNoteFromConversation: (conversationId) => this.writeSectionNoteFromConversation(conversationId),
-        practiceSectionFromConversation: (conversationId) => this.practiceSectionFromConversation(conversationId),
-        reviewLessonFromConversation: (conversationId) => this.reviewLessonFromConversation(conversationId),
-        startNewLessonFromConversation: (conversationId, options) => this.startNewLessonFromConversation(conversationId, options),
+        cacheCourse: (course) => this.cacheCourse(course),
+        refreshOpenLearningViews: (courseId) => this.refreshOpenLearningViews(courseId),
+        refreshOpenChatLearningControls: () => this.refreshOpenChatLearningControls(),
+        maybeKickoffPostAdvance: (conversationId, state) => this.maybeKickoffPostAdvance(conversationId, state),
         openChatConversation: (conversationId) => this.openChatConversation(conversationId),
+        sendSectionNoteTurn: (conversationId, ref) => this.sendSectionNoteTurn(conversationId, ref),
+        sendSectionPracticeTurn: (conversationId, ref) => this.sendSectionPracticeTurn(conversationId, ref),
+        sendLessonReviewTurn: (conversationId, course, lesson) => this.sendLessonReviewTurn(conversationId, course, lesson),
       },
       hasAssistantResponse: (conversationId) => this.hasConversationAssistantResponse(conversationId),
     });
     this.turnCoordinator = new TurnCoordinator({
       stateService: this.stateService,
+      vault: this.adapter,
       turns: this.turns,
       notice: this.notice,
       progression: this.progression,
       readModel: this.readModel,
-      checkNoteQuality: (notePath) => this.checkNoteQuality(notePath),
-      buildRepairPrompt: (conversationId, notePath, reasons) => this.buildRepairPrompt(conversationId, notePath, reasons),
-      clearRepairAttempt: (conversationId, notePath) => this.repairAttempts.delete(this.repairKey(conversationId, notePath)),
       cacheCourse: (course) => this.cacheCourse(course),
       refreshOpenLearningViews: (courseId) => this.refreshOpenLearningViews(courseId),
       openChatConversation: (conversationId) => this.openChatConversation(conversationId),
@@ -543,174 +541,26 @@ export class LearningService {
   }
 
   async advanceSectionFromConversation(conversationId: string): Promise<void> {
-    const ref = await this.stateService.findByConversationId(conversationId);
-    if (!ref) {
-      this.notice.notify('AI Tutor could not find a course for this conversation.');
-      this.refreshOpenChatLearningControls();
-      return;
-    }
-    this.cacheCourse(ref.course);
-
-    const result = await this.progression.advanceSection(ref.course.courseId);
-    if (!result.ok || !result.state) {
-      this.notice.notify(result.message ?? 'AI Tutor could not continue to the next section.');
-      this.refreshOpenChatLearningControls();
-      return;
-    }
-
-    this.cacheCourse(result.state);
-    await this.refreshOpenLearningViews(result.state.courseId);
-    this.refreshOpenChatLearningControls();
-    await this.maybeKickoffPostAdvance(conversationId, result.state);
+    await this.commandCoordinator.advanceSectionFromConversation(conversationId);
   }
 
   async writeSectionNoteFromConversation(conversationId: string): Promise<void> {
-    const ref = await this.stateService.findByConversationId(conversationId);
-    if (!ref) {
-      this.notice.notify('AI Tutor could not find a course for this conversation.');
-      this.refreshOpenChatLearningControls();
-      return;
-    }
-    this.cacheCourse(ref.course);
-
-    if (!this.readModel.isWriteSectionNoteReady(ref)) {
-      this.notice.notify('AI Tutor can only write a note for the current pending section.');
-      this.refreshOpenChatLearningControls();
-      return;
-    }
-
-    const section = ref.lesson.sections[ref.lesson.currentSectionIndex];
-    const tab = await this.findOpenTabForConversation(conversationId);
-    if (!tab || tab.isStreaming) {
-      this.notice.notify('AI Tutor is already working. Try writing the note after the current turn finishes.');
-      this.refreshOpenChatLearningControls();
-      return;
-    }
-
-    const notePath = buildSectionNotePath(ref.course, ref.lesson);
-    const sourceSnippets = await this.sourceLoader.loadCurrentSectionSourceSnippets(ref.lesson);
-    await tab.sendHiddenTurn({
-      content: buildSectionNotePromptWithSources(ref.course, ref.lesson, notePath, sourceSnippets),
-      displayContent: `生成本节笔记：${section.title}`,
-      learningActivity: learningActivity(
-        'Writing section note',
-        `Section ${ref.lesson.currentSectionIndex + 1}/${ref.lesson.sections.length}: ${section.title}`,
-        [
-          section.title,
-          notePath,
-          sourceSnippets.length > 0 ? `${sourceSnippets.length} source snippets` : 'No source snippets resolved',
-          'Run quality gate',
-        ],
-      ),
-    });
+    await this.commandCoordinator.writeSectionNoteFromConversation(conversationId);
   }
 
   async practiceSectionFromConversation(conversationId: string): Promise<void> {
-    const ref = await this.stateService.findByConversationId(conversationId);
-    if (!ref) {
-      this.notice.notify('AI Tutor could not find a course for this conversation.');
-      this.refreshOpenChatLearningControls();
-      return;
-    }
-    this.cacheCourse(ref.course);
-
-    if (!this.readModel.isPracticeSectionReady(ref)) {
-      this.notice.notify('AI Tutor can only practice the current active section.');
-      this.refreshOpenChatLearningControls();
-      return;
-    }
-
-    const section = ref.lesson.sections[ref.lesson.currentSectionIndex];
-    const tab = await this.findOpenTabForConversation(conversationId);
-    if (!tab || tab.isStreaming) {
-      this.notice.notify('AI Tutor is already working. Try the practice check after the current turn finishes.');
-      this.refreshOpenChatLearningControls();
-      return;
-    }
-
-    const sourceSnippets = await this.sourceLoader.loadCurrentSectionSourceSnippets(ref.lesson);
-    await tab.sendHiddenTurn({
-      content: buildSectionPracticePrompt(
-        ref.course,
-        ref.lesson,
-        this.transformationRegistry.get('quiz').body,
-        sourceSnippets,
-      ),
-      displayContent: `小测：${section.title}`,
-      learningActivity: learningActivity(
-        'Preparing practice',
-        `Section ${ref.lesson.currentSectionIndex + 1}/${ref.lesson.sections.length}: ${section.title}`,
-        [
-          section.title,
-          sourceSnippets.length > 0 ? `${sourceSnippets.length} source snippets` : 'No source snippets resolved',
-          'Generate checkpoint questions',
-        ],
-      ),
-    });
+    await this.commandCoordinator.practiceSectionFromConversation(conversationId);
   }
 
   async reviewLessonFromConversation(conversationId: string): Promise<void> {
-    const ref = await this.stateService.findByConversationId(conversationId);
-    if (!ref) {
-      this.notice.notify('AI Tutor could not find a course for this conversation.');
-      this.refreshOpenChatLearningControls();
-      return;
-    }
-    this.cacheCourse(ref.course);
-
-    if (!this.readModel.isReviewLessonReady(ref)) {
-      this.notice.notify('AI Tutor can only review a chapter after it is finished.');
-      this.refreshOpenChatLearningControls();
-      return;
-    }
-
-    if (!await this.sendLessonReviewTurn(conversationId, ref.course, ref.lesson)) {
-      this.notice.notify('AI Tutor is already working. Try the chapter review after the current turn finishes.');
-      this.refreshOpenChatLearningControls();
-      return;
-    }
+    await this.commandCoordinator.reviewLessonFromConversation(conversationId);
   }
 
   async startNewLessonFromConversation(
     conversationId: string,
     options: { force?: boolean } = {},
   ): Promise<void> {
-    const ref = await this.stateService.findByConversationId(conversationId);
-    if (!ref) {
-      this.notice.notify('AI Tutor could not find a course for this conversation.');
-      this.refreshOpenChatLearningControls();
-      return;
-    }
-    this.cacheCourse(ref.course);
-
-    if (!options.force && !this.readModel.isStartNewLessonReady(ref)) {
-      this.notice.notify('Finish and cover every section before starting a new lesson.');
-      this.refreshOpenChatLearningControls();
-      return;
-    }
-
-    const result = await this.progression.startNewLesson(
-      ref.course.courseId,
-      options.force === true
-        ? { type: 'startNewLesson', force: true }
-        : { type: 'startNewLesson' },
-      ref.lesson,
-    );
-
-    if (!result.ok || !result.state) {
-      this.notice.notify(result.message ?? 'AI Tutor could not start a new lesson.');
-      this.refreshOpenChatLearningControls();
-      return;
-    }
-
-    this.cacheCourse(result.state);
-    await this.refreshOpenLearningViews(result.state.courseId);
-    const current = this.stateService.currentLesson(result.state);
-    if (current) {
-      await this.openChatConversation(current.conversationId);
-    } else {
-      this.refreshOpenChatLearningControls();
-    }
+    await this.commandCoordinator.startNewLessonFromConversation(conversationId, options);
   }
 
   async arrangeLearningLayout(courseId: string): Promise<void> {
@@ -768,40 +618,59 @@ export class LearningService {
     }
   }
 
-  private async checkNoteQuality(notePath: string): Promise<{ pass: boolean; reasons: string[] }> {
-    if (!(await this.adapter.exists(notePath))) {
-      return { pass: false, reasons: ['Note file does not exist.'] };
-    }
-    const markdown = await this.adapter.read(notePath);
-    return this.qualityGate.check(markdown);
-  }
-
-  private buildRepairPrompt(conversationId: string, notePath: string, reasons: string[]): string | null {
-    const key = this.repairKey(conversationId, notePath);
-    const nextAttempt = (this.repairAttempts.get(key) ?? 0) + 1;
-    this.repairAttempts.set(key, nextAttempt);
-
-    if (nextAttempt > this.maxRepairAttempts) {
-      this.notice.notify('AI Tutor kept the note file but stopped auto-repair after repeated quality failures.');
-      return null;
+  private async sendSectionNoteTurn(conversationId: string, ref: LoadedLessonRef): Promise<boolean> {
+    const section = ref.lesson.sections[ref.lesson.currentSectionIndex];
+    const tab = await this.findOpenTabForConversation(conversationId);
+    if (!tab || tab.isStreaming) {
+      return false;
     }
 
-    return [
-      `The lesson note at ${notePath} failed the AI Tutor quality gate.`,
-      `Repair attempt ${nextAttempt}/${this.maxRepairAttempts}.`,
-      '',
-      'Please rewrite the same note file in place, fixing these issues:',
-      ...reasons.map((reason) => `- ${reason}`),
-      '',
-      'After rewriting, emit this action again:',
-      '```ai-tutor-action',
-      JSON.stringify({ type: 'sectionNoteWritten', notePath }),
-      '```',
-    ].join('\n');
+    const notePath = buildSectionNotePath(ref.course, ref.lesson);
+    const sourceSnippets = await this.sourceLoader.loadCurrentSectionSourceSnippets(ref.lesson);
+    await tab.sendHiddenTurn({
+      content: buildSectionNotePromptWithSources(ref.course, ref.lesson, notePath, sourceSnippets),
+      displayContent: `生成本节笔记：${section.title}`,
+      learningActivity: learningActivity(
+        'Writing section note',
+        `Section ${ref.lesson.currentSectionIndex + 1}/${ref.lesson.sections.length}: ${section.title}`,
+        [
+          section.title,
+          notePath,
+          sourceSnippets.length > 0 ? `${sourceSnippets.length} source snippets` : 'No source snippets resolved',
+          'Run quality gate',
+        ],
+      ),
+    });
+    return true;
   }
 
-  private repairKey(conversationId: string, notePath: string): string {
-    return `${conversationId}::${notePath}`;
+  private async sendSectionPracticeTurn(conversationId: string, ref: LoadedLessonRef): Promise<boolean> {
+    const section = ref.lesson.sections[ref.lesson.currentSectionIndex];
+    const tab = await this.findOpenTabForConversation(conversationId);
+    if (!tab || tab.isStreaming) {
+      return false;
+    }
+
+    const sourceSnippets = await this.sourceLoader.loadCurrentSectionSourceSnippets(ref.lesson);
+    await tab.sendHiddenTurn({
+      content: buildSectionPracticePrompt(
+        ref.course,
+        ref.lesson,
+        this.transformationRegistry.get('quiz').body,
+        sourceSnippets,
+      ),
+      displayContent: `小测：${section.title}`,
+      learningActivity: learningActivity(
+        'Preparing practice',
+        `Section ${ref.lesson.currentSectionIndex + 1}/${ref.lesson.sections.length}: ${section.title}`,
+        [
+          section.title,
+          sourceSnippets.length > 0 ? `${sourceSnippets.length} source snippets` : 'No source snippets resolved',
+          'Generate checkpoint questions',
+        ],
+      ),
+    });
+    return true;
   }
 
   private async ensureLessonConversation(course: CourseState, lesson: LessonSession): Promise<CourseState> {

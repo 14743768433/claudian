@@ -7,10 +7,12 @@ import type {
   MessageUiBlock,
 } from '../../../../core/types';
 import type { ChatTurnRequest } from '../../../../core/runtime/types';
+import { ContentQualityGate } from '../../content/ContentQualityGate';
 import { ActionRequestChannel } from '../ActionRequestChannel';
 import { LearningContextInjector } from '../../context/LearningContextInjector';
 import type { LearningTurnPort } from '../../ports/LearningTurnPort';
 import type { NoticePort } from '../../ports/NoticePort';
+import type { VaultPort } from '../../ports/VaultPort';
 import type { CourseState, LearningAction, LearningTurnMode, LessonSession, LoadedLessonRef } from '../../state/types';
 import { sourcePathFromText } from '../SourceLoader';
 import type { LessonProgression } from './LessonProgression';
@@ -43,13 +45,11 @@ export interface LearningTurnReadModel {
 
 export interface TurnCoordinatorDependencies {
   stateService: LearningTurnStateService;
+  vault: VaultPort;
   turns: LearningTurnPort;
   notice: NoticePort;
   progression: LessonProgression;
   readModel: LearningTurnReadModel;
-  checkNoteQuality(notePath: string): Promise<{ pass: boolean; reasons: string[] }>;
-  buildRepairPrompt(conversationId: string, notePath: string, reasons: string[]): string | null;
-  clearRepairAttempt(conversationId: string, notePath: string): void;
   cacheCourse(course: CourseState): void;
   refreshOpenLearningViews(courseId: string): Promise<void>;
   openChatConversation(conversationId: string): Promise<void>;
@@ -252,6 +252,9 @@ function chapterReviewNextSteps(lesson: LessonSession): LearningNextStepsContent
 export class TurnCoordinator {
   private readonly actionChannel = new ActionRequestChannel();
   private readonly contextInjector = new LearningContextInjector();
+  private readonly qualityGate = new ContentQualityGate();
+  private readonly repairAttempts = new Map<string, number>();
+  private readonly maxRepairAttempts = 2;
 
   constructor(private readonly deps: TurnCoordinatorDependencies) {}
 
@@ -301,7 +304,7 @@ export class TurnCoordinator {
     for (const request of requests) {
       const actionSummary = describeLearningAction(request.action);
       if (actionNeedsQualityGate(request.action)) {
-        const gate = await this.deps.checkNoteQuality(request.action.notePath);
+        const gate = await this.checkNoteQuality(request.action.notePath);
         if (!gate.pass) {
           this.deps.notice.notify(`AI Tutor note quality gate failed: ${gate.reasons.join(' ')}`);
           actionOutcomes.push({
@@ -309,10 +312,10 @@ export class TurnCoordinator {
             status: 'rejected',
             message: `Quality gate failed: ${gate.reasons.join(' ')}`,
           });
-          repairPrompt = this.deps.buildRepairPrompt(conversationId, request.action.notePath, gate.reasons);
+          repairPrompt = this.buildRepairPrompt(conversationId, request.action.notePath, gate.reasons);
           continue;
         }
-        this.deps.clearRepairAttempt(conversationId, request.action.notePath);
+        this.repairAttempts.delete(this.repairKey(conversationId, request.action.notePath));
       }
 
       const result = request.action.type === 'startNewLesson'
@@ -459,5 +462,41 @@ export class TurnCoordinator {
 
     const message = conversation.messages.find((candidate) => candidate.id === messageId);
     return message?.contentBlocks?.some((block) => block.type === 'learning_activity' && block.label === label) ?? false;
+  }
+
+  private async checkNoteQuality(notePath: string): Promise<{ pass: boolean; reasons: string[] }> {
+    if (!(await this.deps.vault.exists(notePath))) {
+      return { pass: false, reasons: ['Note file does not exist.'] };
+    }
+    const markdown = await this.deps.vault.read(notePath);
+    return this.qualityGate.check(markdown);
+  }
+
+  private buildRepairPrompt(conversationId: string, notePath: string, reasons: string[]): string | null {
+    const key = this.repairKey(conversationId, notePath);
+    const nextAttempt = (this.repairAttempts.get(key) ?? 0) + 1;
+    this.repairAttempts.set(key, nextAttempt);
+
+    if (nextAttempt > this.maxRepairAttempts) {
+      this.deps.notice.notify('AI Tutor kept the note file but stopped auto-repair after repeated quality failures.');
+      return null;
+    }
+
+    return [
+      `The lesson note at ${notePath} failed the AI Tutor quality gate.`,
+      `Repair attempt ${nextAttempt}/${this.maxRepairAttempts}.`,
+      '',
+      'Please rewrite the same note file in place, fixing these issues:',
+      ...reasons.map((reason) => `- ${reason}`),
+      '',
+      'After rewriting, emit this action again:',
+      '```ai-tutor-action',
+      JSON.stringify({ type: 'sectionNoteWritten', notePath }),
+      '```',
+    ].join('\n');
+  }
+
+  private repairKey(conversationId: string, notePath: string): string {
+    return `${conversationId}::${notePath}`;
   }
 }

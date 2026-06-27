@@ -16,7 +16,8 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 - `LearningController` is a composition root facade. Current baseline reports about 50 lines versus Phase 0 baseline 1898.
 - `LearningService` is no longer the Obsidian god object; responsibilities are split into `NavigationCoordinator`, `CommandCoordinator`, `TurnCoordinator`, `LearningReadModel`, `SourceLoader`, `LessonProgression`, `SummaryService`, `StateTransitionService`, and `IndexRepository`.
 - `TurnCoordinator` owns turn decoration, assistant-turn completion, action result persistence, review next-step persistence, and repair orchestration.
-- `CommandCoordinator` owns command parsing and delegates the existing `*FromConversation` command workflows through the learning facade. The workflow bodies remain behavior-preserving facade methods because moving the prompt builders would be a larger non-behavioral split.
+- `TurnCoordinator` owns deterministic note quality checks and repair-attempt limits.
+- `CommandCoordinator` owns command parsing and the `*FromConversation` command workflows; `LearningService` keeps same public methods as thin compatibility forwards.
 - Obsidian imports in the learning feature are limited to `adapters/**` and `views/**`.
 - `domain/LearningStateMachine` is pure: `reduce(state, action) -> { nextState, effects }`.
 - `application/StateTransitionService` is the persistence path used by business actions and migrated system actions.
@@ -33,6 +34,7 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 - `npm run verify`: passed.
 - `npm run learning:baseline` reports:
   - `src/features/learning/LearningController.ts`: 50 lines.
+  - `src/features/learning/application/LearningService.ts`: 916 lines after coordinator extraction.
   - `src/features/chat/controllers/InputController.ts`: 1807 lines.
   - real `saveCourse` call site: `src/features/learning/application/StateTransitionService.ts`.
   - learning-feature `obsidian` imports only in `adapters/**` and `views/**`.
