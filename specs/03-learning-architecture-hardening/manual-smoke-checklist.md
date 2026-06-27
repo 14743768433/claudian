@@ -30,6 +30,7 @@ Core smoke:
 
 Post-smoke persistence check:
 
+- If needed, run `npm run learning:verify-manual-smoke -- --list` to find the tested `courseId`.
 - Run `npm run learning:verify-manual-smoke`.
 - If the tested course is not the newest course in `data.json`, run `npm run learning:verify-manual-smoke -- --course-id <courseId>`.
 - Confirm the script reports:

@@ -17,6 +17,15 @@ if (entries.length === 0) {
   failures.push('No AI Tutor course index entries found in plugin data.');
 }
 
+if (args.list) {
+  if (failures.length > 0) {
+    printFailures(null, entries);
+    process.exit(1);
+  }
+  printCourseList(entries);
+  process.exit(0);
+}
+
 const entry = selectCourse(entries, args.courseId);
 let state = null;
 let statePath = null;
@@ -31,16 +40,7 @@ if (state && entry) {
 }
 
 if (failures.length > 0) {
-  process.stderr.write('AI Tutor manual smoke state verification failed:\n');
-  for (const failure of failures) {
-    process.stderr.write(`- ${failure}\n`);
-  }
-  if (notes.length > 0) {
-    process.stderr.write('\nNotes:\n');
-    for (const note of notes) {
-      process.stderr.write(`- ${note}\n`);
-    }
-  }
+  printFailures(entry, entries);
   process.exit(1);
 }
 
@@ -138,6 +138,58 @@ function selectCourse(entries, courseId) {
   return [...entries].sort((a, b) => b.updatedAt - a.updatedAt)[0];
 }
 
+function printFailures(entry, entries) {
+  process.stderr.write('AI Tutor manual smoke state verification failed:\n');
+  for (const failure of failures) {
+    process.stderr.write(`- ${failure}\n`);
+  }
+  if (entry) {
+    process.stderr.write(`\nSelected course: ${formatCourse(entry)}\n`);
+  }
+  if (notes.length > 0) {
+    process.stderr.write('\nNotes:\n');
+    for (const note of notes) {
+      process.stderr.write(`- ${note}\n`);
+    }
+  }
+  if (entries.length > 0) {
+    process.stderr.write('\nAvailable courses:\n');
+    for (const candidate of sortedCourses(entries)) {
+      process.stderr.write(`- ${formatCourse(candidate)}\n`);
+    }
+    if (!args.courseId) {
+      process.stderr.write('\nDefaulted to the newest course. If you smoke-tested a different course, rerun with --course-id <courseId>.\n');
+    }
+  }
+}
+
+function printCourseList(entries) {
+  if (entries.length === 0) {
+    process.stdout.write('No AI Tutor course index entries found.\n');
+    return;
+  }
+  process.stdout.write('AI Tutor indexed courses:\n');
+  for (const entry of sortedCourses(entries)) {
+    process.stdout.write(`- ${formatCourse(entry)}\n`);
+  }
+}
+
+function sortedCourses(entries) {
+  return [...entries].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+function formatCourse(entry) {
+  return `${entry.title} (${entry.courseId}) current=${entry.currentLessonId} updated=${formatUpdatedAt(entry.updatedAt)} root=${entry.rootPath}`;
+}
+
+function formatUpdatedAt(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  return date.toISOString();
+}
+
 function readJson(filePath, label) {
   if (!fs.existsSync(filePath)) {
     failures.push(`Missing ${label}: ${relative(filePath)}.`);
@@ -185,6 +237,8 @@ function parseArgs(argv) {
       parsed.pluginId = argv[++index] ?? parsed.pluginId;
     } else if (arg === '--course-id') {
       parsed.courseId = argv[++index] ?? parsed.courseId;
+    } else if (arg === '--list') {
+      parsed.list = true;
     } else if (arg === '--help' || arg === '-h') {
       printHelp();
       process.exit(0);
@@ -202,6 +256,7 @@ function printHelp() {
     '  --vault <path>       Obsidian vault root. Default: ai-tutor-test-vault',
     '  --plugin-id <id>     Plugin folder name. Default: claudian-ai-tutor',
     '  --course-id <id>     Verify a specific course. Defaults to the newest course index entry.',
+    '  --list              List indexed courses and exit.',
   ].join('\n'));
 }
 
