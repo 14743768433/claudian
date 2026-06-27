@@ -68,7 +68,7 @@ function openHotkeySettings(app: App): void {
       return;
     }
 
-    searchEl.value = 'Claudian';
+    searchEl.value = 'AI Tutor';
     tab.updateHotkeyVisibility?.();
   }, 100);
 }

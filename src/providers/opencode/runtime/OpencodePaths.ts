@@ -11,16 +11,16 @@ export function resolveOpencodeDataDir(
 ): string {
   const xdgDataHome = env.XDG_DATA_HOME?.trim();
   if (xdgDataHome) {
-    return path.join(xdgDataHome, OPENCODE_APP_NAME);
+    return joinPathLike(xdgDataHome, OPENCODE_APP_NAME);
   }
 
   const home = env.HOME || os.homedir();
   if (process.platform === 'win32') {
-    const appData = env.APPDATA || env.LOCALAPPDATA || path.join(home, 'AppData', 'Roaming');
-    return path.join(appData, OPENCODE_APP_NAME);
+    const appData = env.APPDATA || env.LOCALAPPDATA || joinPathLike(home, 'AppData', 'Roaming');
+    return joinPathLike(appData, OPENCODE_APP_NAME);
   }
 
-  return path.join(home, '.local', 'share', OPENCODE_APP_NAME);
+  return joinPathLike(home, '.local', 'share', OPENCODE_APP_NAME);
 }
 
 export function resolveOpencodeDatabasePath(
@@ -31,7 +31,7 @@ export function resolveOpencodeDatabasePath(
     if (override === ':memory:' || path.isAbsolute(override)) {
       return override;
     }
-    return path.join(resolveOpencodeDataDir(env), override);
+    return joinPathLike(resolveOpencodeDataDir(env), override);
   }
 
   const candidates = getOpencodeDatabasePathCandidates(env);
@@ -74,11 +74,11 @@ function getOpencodeDatabasePathCandidates(
   const home = env.HOME || os.homedir();
   const dataDirs = [
     resolveOpencodeDataDir(env),
-    path.join(home, 'Library', 'Application Support', OPENCODE_APP_NAME),
+    joinPathLike(home, 'Library', 'Application Support', OPENCODE_APP_NAME),
   ];
 
   for (const dataDir of dataDirs) {
-    pushCandidate(candidates, seen, path.join(dataDir, DEFAULT_DATABASE_NAME));
+    pushCandidate(candidates, seen, joinPathLike(dataDir, DEFAULT_DATABASE_NAME));
     try {
       const matches = fs.readdirSync(dataDir)
         .filter((entry) => DATABASE_NAME_PATTERN.test(entry))
@@ -89,7 +89,7 @@ function getOpencodeDatabasePathCandidates(
         });
 
       for (const entry of matches) {
-        pushCandidate(candidates, seen, path.join(dataDir, entry));
+        pushCandidate(candidates, seen, joinPathLike(dataDir, entry));
       }
     } catch {
       // Ignore missing dirs and unreadable locations.
@@ -110,4 +110,10 @@ function pushCandidate(
 
   seen.add(candidate);
   candidates.push(candidate);
+}
+
+function joinPathLike(first: string, ...parts: string[]): string {
+  return /^[A-Za-z]:(?:[\\/]|$)/.test(first) || first.includes('\\')
+    ? path.win32.join(first, ...parts)
+    : path.posix.join(first, ...parts);
 }

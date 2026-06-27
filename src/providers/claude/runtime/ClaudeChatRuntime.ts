@@ -647,6 +647,7 @@ export class ClaudianService implements ChatRuntime {
       vaultPath,
       cliPath,
       settings: this.getScopedSettings(),
+      systemPromptAppendices: this.plugin.getSystemPromptAppendices?.(),
       customEnv,
       enhancedPath,
       mcpManager: this.mcpManager,

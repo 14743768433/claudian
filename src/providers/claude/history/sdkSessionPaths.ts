@@ -11,12 +11,11 @@ import type { SDKNativeMessage, SDKSessionReadResult } from './sdkHistoryTypes';
  * This handles Unicode characters and special chars.
  */
 export function encodeVaultPathForSDK(vaultPath: string): string {
-  const absolutePath = path.resolve(vaultPath);
-  return absolutePath.replace(/[^a-zA-Z0-9]/g, '-');
+  return vaultPath.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
 export function getSDKProjectsPath(): string {
-  return path.join(os.homedir(), '.claude', 'projects');
+  return joinPathLike(os.homedir(), '.claude', 'projects');
 }
 
 /** Validates an identifier for safe use in filesystem paths (no traversal, bounded length). */
@@ -41,7 +40,7 @@ export function getSDKSessionPath(vaultPath: string, sessionId: string): string 
 
   const projectsPath = getSDKProjectsPath();
   const encodedVault = encodeVaultPathForSDK(vaultPath);
-  return path.join(projectsPath, encodedVault, `${sessionId}.jsonl`);
+  return joinPathLike(projectsPath, encodedVault, `${sessionId}.jsonl`);
 }
 
 export function sdkSessionExists(vaultPath: string, sessionId: string): boolean {
@@ -51,6 +50,12 @@ export function sdkSessionExists(vaultPath: string, sessionId: string): boolean 
   } catch {
     return false;
   }
+}
+
+function joinPathLike(first: string, ...parts: string[]): string {
+  return /^[A-Za-z]:(?:[\\/]|$)/.test(first) || first.includes('\\')
+    ? path.win32.join(first, ...parts)
+    : path.posix.join(first, ...parts);
 }
 
 export async function deleteSDKSession(vaultPath: string, sessionId: string): Promise<void> {

@@ -25,6 +25,7 @@ import type {
   ClaudianSettings,
   Conversation,
   ConversationMeta,
+  MessageUiBlock,
 } from './core/types';
 import {
   VIEW_TYPE_CLAUDIAN,
@@ -32,6 +33,15 @@ import {
 import type { ChatViewPlacement, EnvironmentScope } from './core/types/settings';
 import { ClaudianView } from './features/chat/ClaudianView';
 import { type InlineEditContext, InlineEditModal } from './features/inline-edit/ui/InlineEditModal';
+import { LearningController } from './features/learning/LearningController';
+import { ChapterListView } from './features/learning/views/ChapterListView';
+import { CourseArtifactsView } from './features/learning/views/CourseArtifactsView';
+import { CourseLibraryView } from './features/learning/views/CourseLibraryView';
+import {
+  VIEW_TYPE_CHAPTER_LIST,
+  VIEW_TYPE_COURSE_ARTIFACTS,
+  VIEW_TYPE_COURSE_LIBRARY,
+} from './features/learning/views/viewTypes';
 import { ClaudianSettingTab } from './features/settings/ClaudianSettings';
 import { setLocale } from './i18n/i18n';
 import type { Locale } from './i18n/types';
@@ -50,27 +60,50 @@ function isClaudianView(value: unknown): value is ClaudianView {
 export default class ClaudianPlugin extends Plugin {
   settings!: ClaudianSettings;
   storage!: SharedAppStorage;
+  learningController!: LearningController;
   private conversations: Conversation[] = [];
   private lastKnownTabManagerState: AppTabManagerState | null = null;
 
   async onload() {
     await this.loadSettings();
     await ProviderWorkspaceRegistry.initializeAll(this);
+    this.learningController = new LearningController(this);
+    await this.learningController.initialize();
 
     this.registerView(
       VIEW_TYPE_CLAUDIAN,
       (leaf) => new ClaudianView(leaf, this)
     );
+    this.registerView(
+      VIEW_TYPE_COURSE_LIBRARY,
+      (leaf) => new CourseLibraryView(leaf, this)
+    );
+    this.registerView(
+      VIEW_TYPE_CHAPTER_LIST,
+      (leaf) => new ChapterListView(leaf, this)
+    );
+    this.registerView(
+      VIEW_TYPE_COURSE_ARTIFACTS,
+      (leaf) => new CourseArtifactsView(leaf, this)
+    );
 
-    this.addRibbonIcon('bot', 'Open Claudian', () => {
-      void this.activateView();
+    this.addRibbonIcon('graduation-cap', 'Open AI Tutor', () => {
+      void this.learningController.openLibrary();
     });
 
     this.addCommand({
       id: 'open-view',
-      name: 'Open chat view',
+      name: 'Open AI Tutor chat',
       callback: () => {
         void this.activateView();
+      },
+    });
+
+    this.addCommand({
+      id: 'open-course-library',
+      name: 'AI Tutor: 打开课程书架',
+      callback: () => {
+        void this.learningController.openLibrary();
       },
     });
 
@@ -176,6 +209,7 @@ export default class ClaudianPlugin extends Plugin {
     });
 
     this.addSettingTab(new ClaudianSettingTab(this.app, this));
+    this.registerLearningVaultEvents();
   }
 
   onunload(): void {
@@ -334,6 +368,7 @@ export default class ClaudianPlugin extends Plugin {
         usage: meta.usage,
         titleGenerationStatus: meta.titleGenerationStatus,
         resumeAtMessageId: meta.resumeAtMessageId,
+        uiMessageBlocks: meta.uiMessageBlocks,
       };
     }).sort(
       (a, b) => (b.lastResponseAt ?? b.updatedAt) - (a.lastResponseAt ?? a.updatedAt)
@@ -393,6 +428,29 @@ export default class ClaudianPlugin extends Plugin {
     );
 
     await this.storage.saveClaudianSettings(this.settings);
+  }
+
+  getSystemPromptAppendices(): string[] {
+    return this.learningController?.getSystemPromptAppendices() ?? [];
+  }
+
+  private registerLearningVaultEvents(): void {
+    const registerEvent = (this as unknown as { registerEvent?: (eventRef: unknown) => void }).registerEvent;
+    const vault = this.app.vault as unknown as {
+      on?: (name: string, callback: (...args: any[]) => void) => unknown;
+    };
+    if (!registerEvent || !vault.on) return;
+
+    const renameRef = vault.on('rename', (file: { path?: string }, oldPath: string) => {
+      if (!file.path) return;
+      void this.learningController.handleVaultRename(oldPath, file.path);
+    });
+    const deleteRef = vault.on('delete', (file: { path?: string }) => {
+      if (!file.path) return;
+      void this.learningController.handleVaultDelete(file.path);
+    });
+    registerEvent.call(this, renameRef);
+    registerEvent.call(this, deleteRef);
   }
 
   /** Updates and persists environment variables, restarting processes to apply changes. */
@@ -598,6 +656,93 @@ export default class ClaudianPlugin extends Plugin {
     await ProviderRegistry
       .getConversationHistoryService(conversation.providerId)
       .hydrateConversationHistory(conversation, getVaultPath(this.app));
+    this.applyUiMessageBlocks(conversation);
+  }
+
+  private applyUiMessageBlocks(conversation: Conversation): void {
+    const uiMessageBlocks = conversation.uiMessageBlocks;
+    if (!uiMessageBlocks) return;
+
+    for (const message of conversation.messages) {
+      const blocks = uiMessageBlocks[message.id];
+      if (!Array.isArray(blocks) || blocks.length === 0) continue;
+      const validBlocks = blocks.filter((block): block is MessageUiBlock => this.isMessageUiBlock(block));
+      if (validBlocks.length === 0) continue;
+
+      const uiBlockTypes = new Set<string>(validBlocks.map(block => block.type));
+      message.contentBlocks = [
+        ...(message.contentBlocks ?? []).filter(block => !uiBlockTypes.has(block.type)),
+        ...validBlocks,
+      ];
+    }
+  }
+
+  private isMessageUiBlock(block: unknown): block is MessageUiBlock {
+    if (!block || typeof block !== 'object') return false;
+    const candidate = block as Partial<MessageUiBlock>;
+    if (!candidate.type) return false;
+
+    if (candidate.type === 'learning_activity') {
+      return typeof candidate.label === 'string'
+        && (candidate.detail === undefined || typeof candidate.detail === 'string')
+        && (candidate.items === undefined || (
+          Array.isArray(candidate.items)
+          && candidate.items.every((item) => typeof item === 'string')
+        ))
+        && (candidate.status === 'running'
+        || candidate.status === 'done'
+        || candidate.status === 'error'
+        || candidate.status === 'stopped');
+    }
+
+    if (candidate.type === 'learning_lesson_plan') {
+      const plan = candidate as Partial<MessageUiBlock> & {
+        title?: unknown;
+        overview?: unknown;
+        detail?: unknown;
+        parts?: unknown;
+        nextLessonSummary?: unknown;
+      };
+      return typeof plan.title === 'string'
+        && (plan.overview === undefined || typeof plan.overview === 'string')
+        && (plan.detail === undefined || typeof plan.detail === 'string')
+        && (plan.nextLessonSummary === undefined || typeof plan.nextLessonSummary === 'string')
+        && Array.isArray(plan.parts)
+        && plan.parts.every((part) => {
+          if (!part || typeof part !== 'object') return false;
+          const item = part as { title?: unknown; status?: unknown; description?: unknown; bulletPoints?: unknown; sources?: unknown };
+          return typeof item.title === 'string'
+            && (item.status === undefined || item.status === 'current' || item.status === 'pending' || item.status === 'done' || item.status === 'review')
+            && (item.description === undefined || typeof item.description === 'string')
+            && (item.bulletPoints === undefined || (
+              Array.isArray(item.bulletPoints)
+              && item.bulletPoints.every((point) => typeof point === 'string')
+            ))
+            && (item.sources === undefined || (
+              Array.isArray(item.sources)
+              && item.sources.every((source) => typeof source === 'string')
+            ));
+        });
+    }
+
+    if (candidate.type === 'learning_next_steps') {
+      const nextSteps = candidate as Partial<MessageUiBlock> & {
+        label?: unknown;
+        detail?: unknown;
+        options?: unknown;
+      };
+      return (nextSteps.label === undefined || typeof nextSteps.label === 'string')
+        && (nextSteps.detail === undefined || typeof nextSteps.detail === 'string')
+        && Array.isArray(nextSteps.options)
+        && nextSteps.options.every((option) => typeof option === 'string');
+    }
+
+    return candidate.type === 'learning_action_result'
+      && typeof candidate.label === 'string'
+      && typeof candidate.actionType === 'string'
+      && (candidate.status === 'accepted' || candidate.status === 'rejected')
+      && (candidate.detail === undefined || typeof candidate.detail === 'string')
+      && (candidate.message === undefined || typeof candidate.message === 'string');
   }
 
   async createConversation(options?: {

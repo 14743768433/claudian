@@ -141,6 +141,10 @@ function createMockDeps(overrides: Partial<InputControllerDeps> = {}): InputCont
       addMessage: jest.fn().mockReturnValue({
         querySelector: jest.fn().mockReturnValue(createMockEl()),
       }),
+      appendLearningActivity: jest.fn(),
+      appendLearningActionResults: jest.fn(),
+      appendLearningLessonPlans: jest.fn(),
+      appendLearningNextSteps: jest.fn(),
       refreshActionButtons: jest.fn(),
       removeMessage: jest.fn(),
       updateLiveUserMessage: jest.fn(),
@@ -975,6 +979,94 @@ describe('InputController - Message Queue', () => {
 
       expect(deps.state.messages[0].content).toBe('@server-a hello');
       expect(deps.state.messages[0].content).not.toBe('@server-a MCP hello');
+    });
+
+    it('should mark hidden learning activity done and persist the final UI block', async () => {
+      deps = createSendableDeps();
+      (deps.plugin.getConversationSync as jest.Mock).mockReturnValue({ id: 'conv-1', uiMessageBlocks: {} });
+      (deps as any).mockAgentService.query = jest.fn().mockImplementation(() => createMockStream([
+        { type: 'text', content: 'Chapter plan ready.' },
+        { type: 'done' },
+      ]));
+
+      inputEl = deps.getInputEl() as ReturnType<typeof createMockInputEl>;
+      controller = new InputController(deps);
+
+      await controller.sendMessage({
+        content: 'Plan the next chapter',
+        hideUserMessage: true,
+        learningActivity: {
+          type: 'learning_activity',
+          label: 'Planning chapter',
+          status: 'running',
+          detail: 'Chapter 2: Filters',
+          items: ['Read continuity', 'Plan sections'],
+        },
+      });
+
+      const assistantMessageId = deps.state.messages[1].id;
+      expect(deps.renderer.appendLearningActivity).toHaveBeenCalledWith(
+        assistantMessageId,
+        expect.objectContaining({ status: 'running' }),
+      );
+      expect(deps.renderer.appendLearningActivity).toHaveBeenCalledWith(
+        assistantMessageId,
+        expect.objectContaining({ status: 'done' }),
+      );
+      expect(deps.plugin.updateConversation).toHaveBeenCalledWith('conv-1', {
+        uiMessageBlocks: {
+          [assistantMessageId]: [
+            expect.objectContaining({
+              type: 'learning_activity',
+              label: 'Planning chapter',
+              status: 'done',
+              items: ['Read continuity', 'Plan sections'],
+            }),
+          ],
+        },
+      });
+    });
+
+    it('should mark hidden learning activity as error when the provider turn fails', async () => {
+      deps = createSendableDeps();
+      (deps.plugin.getConversationSync as jest.Mock).mockReturnValue({ id: 'conv-1', uiMessageBlocks: {} });
+      (deps as any).mockAgentService.query = jest.fn().mockImplementation(() => {
+        throw new Error('Connection failed');
+      });
+
+      inputEl = deps.getInputEl() as ReturnType<typeof createMockInputEl>;
+      controller = new InputController(deps);
+
+      await controller.sendMessage({
+        content: 'Start chapter',
+        hideUserMessage: true,
+        learningActivity: {
+          type: 'learning_activity',
+          label: 'Starting chapter section',
+          status: 'running',
+          detail: 'Chapter 2: Filters',
+        },
+      });
+
+      const assistantMessageId = deps.state.messages[1].id;
+      expect(deps.renderer.appendLearningActivity).toHaveBeenLastCalledWith(
+        assistantMessageId,
+        expect.objectContaining({
+          status: 'error',
+          detail: expect.stringContaining('Connection failed'),
+        }),
+      );
+      expect(deps.plugin.updateConversation).toHaveBeenCalledWith('conv-1', {
+        uiMessageBlocks: {
+          [assistantMessageId]: [
+            expect.objectContaining({
+              type: 'learning_activity',
+              status: 'error',
+              detail: expect.stringContaining('Connection failed'),
+            }),
+          ],
+        },
+      });
     });
 
     it('should prepend current note only once per session', async () => {

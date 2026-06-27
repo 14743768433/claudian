@@ -75,10 +75,10 @@ export function expandHomePath(p: string): string {
     return os.homedir();
   }
   if (expanded.startsWith('~/')) {
-    return path.join(os.homedir(), expanded.slice(2));
+    return joinForPlatform(process.platform, os.homedir(), expanded.slice(2));
   }
   if (expanded.startsWith('~\\')) {
-    return path.join(os.homedir(), expanded.slice(2));
+    return joinForPlatform(process.platform, os.homedir(), expanded.slice(2));
   }
   return expanded;
 }
@@ -98,17 +98,19 @@ export function parsePathEntries(pathValue?: string): string[] {
     return [];
   }
 
-  const delimiter = process.platform === 'win32' ? ';' : ':';
-
-  return pathValue
-    .split(delimiter)
+  return splitPathValue(pathValue)
     .map(segment => stripSurroundingQuotes(segment.trim()))
     .filter(segment => {
       if (!segment) return false;
       const upper = segment.toUpperCase();
       return upper !== '$PATH' && upper !== '${PATH}' && upper !== '%PATH%';
     })
-    .map(segment => translateMsysPath(expandHomePath(segment)));
+    .map(segment => {
+      const expanded = expandHomePath(segment);
+      return shouldTranslateMsysPathEntry(expanded)
+        ? translateMsysPath(expanded)
+        : expanded;
+    });
 }
 
 
@@ -137,7 +139,7 @@ function resolveNvmAlias(nvmDir: string, alias: string, depth = 0): string | nul
   if (isNvmBuiltInLatestAlias(alias)) return alias;
 
   try {
-    const aliasFile = path.join(nvmDir, 'alias', ...alias.split('/'));
+    const aliasFile = joinForPlatform(process.platform, nvmDir, 'alias', ...alias.split('/'));
     const target = fs.readFileSync(aliasFile, 'utf8').trim();
     if (!target) return null;
     return resolveNvmAlias(nvmDir, target, depth + 1);
@@ -149,16 +151,16 @@ function resolveNvmAlias(nvmDir: string, alias: string, depth = 0): string | nul
 // GUI apps don't have NVM_BIN set, so we resolve nvm's default alias
 // from the filesystem and match against installed versions.
 export function resolveNvmDefaultBin(home: string): string | null {
-  const nvmDir = process.env.NVM_DIR || path.join(home, '.nvm');
+  const nvmDir = process.env.NVM_DIR || joinForPlatform(process.platform, home, '.nvm');
 
   try {
-    const alias = fs.readFileSync(path.join(nvmDir, 'alias', 'default'), 'utf8').trim();
+    const alias = fs.readFileSync(joinForPlatform(process.platform, nvmDir, 'alias', 'default'), 'utf8').trim();
     if (!alias) return null;
 
     const resolved = resolveNvmAlias(nvmDir, alias);
     if (!resolved) return null;
 
-    const versionsDir = path.join(nvmDir, 'versions', 'node');
+    const versionsDir = joinForPlatform(process.platform, nvmDir, 'versions', 'node');
     const entries = fs.readdirSync(versionsDir)
       .filter(entry => entry.startsWith('v'))
       .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
@@ -166,7 +168,7 @@ export function resolveNvmDefaultBin(home: string): string | null {
     const matched = findMatchingNvmVersion(entries, resolved);
 
     if (matched) {
-      const binDir = path.join(versionsDir, matched, 'bin');
+      const binDir = joinForPlatform(process.platform, versionsDir, matched, 'bin');
       if (fs.existsSync(binDir)) return binDir;
     }
   } catch {
@@ -218,14 +220,49 @@ export function translateMsysPath(value: string): string {
     return value;
   }
 
-  const msysMatch = value.match(/^\/([a-zA-Z])(\/.*)?$/);
+  const rootMatch = value.match(/^\/([c-zC-Z])\/?$/);
+  if (rootMatch) {
+    const driveLetter = rootMatch[1].toUpperCase();
+    return value.endsWith('/') ? `${driveLetter}:\\` : `${driveLetter}:`;
+  }
+
+  const msysMatch = value.match(/^\/([c-zC-Z])\/(.+)$/);
   if (msysMatch) {
     const driveLetter = msysMatch[1].toUpperCase();
     const restOfPath = msysMatch[2] ?? '';
-    return `${driveLetter}:${restOfPath.replace(/\//g, '\\')}`;
+    return `${driveLetter}:\\${restOfPath.replace(/\//g, '\\')}`;
   }
 
   return value;
+}
+
+function splitPathValue(pathValue: string): string[] {
+  if (process.platform !== 'win32') {
+    return pathValue.split(':');
+  }
+
+  const entries: string[] = [];
+  for (const semicolonPart of pathValue.split(';')) {
+    let tokenStart = 0;
+    for (let index = 0; index < semicolonPart.length; index++) {
+      if (semicolonPart[index] !== ':') {
+        continue;
+      }
+      const isDriveColon = index === 1 && /^[A-Za-z]$/.test(semicolonPart[0] ?? '');
+      if (isDriveColon) {
+        continue;
+      }
+
+      entries.push(semicolonPart.slice(tokenStart, index));
+      tokenStart = index + 1;
+    }
+    entries.push(semicolonPart.slice(tokenStart));
+  }
+  return entries;
+}
+
+function shouldTranslateMsysPathEntry(value: string): boolean {
+  return /^\/[c-zC-Z]\/.+/.test(value);
 }
 
 function normalizePathBeforeResolution(p: string): string {
@@ -258,9 +295,7 @@ export function normalizePathForFilesystem(value: string): string {
   const expanded = normalizePathBeforeResolution(value);
   const normalized = (() => {
     try {
-      return process.platform === 'win32'
-        ? path.win32.normalize(expanded)
-        : path.normalize(expanded);
+      return normalizerForPath(expanded).normalize(expanded);
     } catch {
       return expanded;
     }
@@ -277,9 +312,7 @@ export function normalizePathForComparison(value: string): string {
   const expanded = normalizePathBeforeResolution(value);
   const normalized = (() => {
     try {
-      return process.platform === 'win32'
-        ? path.win32.normalize(expanded)
-        : path.normalize(expanded);
+      return normalizerForPath(expanded).normalize(expanded);
     } catch {
       return expanded;
     }
@@ -292,6 +325,30 @@ export function normalizePathForComparison(value: string): string {
   return process.platform === 'win32'
     ? normalizedWithPrefix.toLowerCase()
     : normalizedWithPrefix;
+}
+
+function joinForPlatform(platform: NodeJS.Platform, first: string, ...parts: string[]): string {
+  return platform === 'win32'
+    ? path.win32.join(first, ...parts)
+    : path.posix.join(first, ...parts);
+}
+
+function normalizerForPath(value: string): Pick<typeof path, 'normalize'> {
+  if (process.platform !== 'win32') {
+    return path;
+  }
+
+  if (
+    value.includes('\\') ||
+    /^[a-zA-Z]:(?:[\\/]|$)/.test(value) ||
+    value.startsWith('\\\\?\\') ||
+    value.startsWith('\\\\') ||
+    /^\/\/[^/]+\/[^/]+/.test(value)
+  ) {
+    return path.win32;
+  }
+
+  return path.posix;
 }
 
 export function isPathWithinDirectory(

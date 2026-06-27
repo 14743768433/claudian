@@ -1,9 +1,9 @@
 {
-  "id": "realclaudian",
-  "name": "Claudian",
+  "id": "claudian-ai-tutor",
+  "name": "AI Tutor",
   "version": "2.0.25",
   "minAppVersion": "1.7.2",
-  "description": "Embeds Claude Code, Codex, and other coding agents as AI collaborators in your vault. Your vault becomes their working directory, giving them capabilities for file reads and writes, search, bash commands, and multi-step workflows.",
+  "description": "An Obsidian-native AI learning tutor with an integrated agent runtime.",
   "author": "Yishen Tu",
   "authorUrl": "https://github.com/YishenTu",
   "isDesktopOnly": true

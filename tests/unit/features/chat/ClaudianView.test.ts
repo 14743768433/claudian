@@ -174,6 +174,151 @@ describe('ClaudianView tab controls', () => {
 
     expect(historyDropdown.hasClass('visible')).toBe(false);
   });
+
+  it('shows the write-note action only when the current learning section can be written', () => {
+    const practiceButtonEl = createMockEl('button');
+    const writeNoteButtonEl = createMockEl('button');
+    const advanceSectionButtonEl = createMockEl('button');
+    const reviewLessonButtonEl = createMockEl('button');
+    const startNewLessonButtonEl = createMockEl('button');
+    const advanceSectionButtonLabelEl = createMockEl();
+    const view = Object.create(ClaudianView.prototype) as any;
+
+    view.practiceButtonEl = practiceButtonEl;
+    view.writeNoteButtonEl = writeNoteButtonEl;
+    view.advanceSectionButtonEl = advanceSectionButtonEl;
+    view.reviewLessonButtonEl = reviewLessonButtonEl;
+    view.startNewLessonButtonEl = startNewLessonButtonEl;
+    view.advanceSectionButtonLabelEl = advanceSectionButtonLabelEl;
+    view.tabManager = {
+      getActiveTab: jest.fn().mockReturnValue({
+        state: { currentConversationId: 'conv-1', isStreaming: false },
+      }),
+    };
+    view.plugin = {
+      learningController: {
+        canPracticeSection: jest.fn().mockReturnValue(false),
+        canWriteSectionNote: jest.fn().mockReturnValue(true),
+        canAdvanceSection: jest.fn().mockReturnValue(false),
+        canReviewLesson: jest.fn().mockReturnValue(false),
+        getAdvanceSectionLabel: jest.fn().mockReturnValue(null),
+        canStartNewLesson: jest.fn().mockReturnValue(false),
+      },
+    };
+
+    view.updateLearningActionButton();
+
+    expect(writeNoteButtonEl.hasClass('claudian-hidden')).toBe(false);
+    expect(writeNoteButtonEl.getAttribute('disabled')).toBeNull();
+    expect(writeNoteButtonEl.getAttribute('aria-hidden')).toBeNull();
+    expect(practiceButtonEl.hasClass('claudian-hidden')).toBe(true);
+    expect(advanceSectionButtonEl.hasClass('claudian-hidden')).toBe(true);
+    expect(reviewLessonButtonEl.hasClass('claudian-hidden')).toBe(true);
+    expect(startNewLessonButtonEl.hasClass('claudian-hidden')).toBe(true);
+
+    view.plugin.learningController.canWriteSectionNote.mockReturnValue(false);
+
+    view.updateLearningActionButton();
+
+    expect(writeNoteButtonEl.hasClass('claudian-hidden')).toBe(true);
+    expect(writeNoteButtonEl.getAttribute('disabled')).toBe('true');
+    expect(writeNoteButtonEl.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('shows the practice action while the current learning section is active', () => {
+    const practiceButtonEl = createMockEl('button');
+    const writeNoteButtonEl = createMockEl('button');
+    const advanceSectionButtonEl = createMockEl('button');
+    const reviewLessonButtonEl = createMockEl('button');
+    const startNewLessonButtonEl = createMockEl('button');
+    const view = Object.create(ClaudianView.prototype) as any;
+
+    view.practiceButtonEl = practiceButtonEl;
+    view.writeNoteButtonEl = writeNoteButtonEl;
+    view.advanceSectionButtonEl = advanceSectionButtonEl;
+    view.reviewLessonButtonEl = reviewLessonButtonEl;
+    view.startNewLessonButtonEl = startNewLessonButtonEl;
+    view.advanceSectionButtonLabelEl = createMockEl();
+    view.tabManager = {
+      getActiveTab: jest.fn().mockReturnValue({
+        state: { currentConversationId: 'conv-1', isStreaming: false },
+      }),
+    };
+    view.plugin = {
+      learningController: {
+        canPracticeSection: jest.fn().mockReturnValue(true),
+        canWriteSectionNote: jest.fn().mockReturnValue(false),
+        canAdvanceSection: jest.fn().mockReturnValue(false),
+        canReviewLesson: jest.fn().mockReturnValue(false),
+        getAdvanceSectionLabel: jest.fn().mockReturnValue(null),
+        canStartNewLesson: jest.fn().mockReturnValue(false),
+      },
+    };
+
+    view.updateLearningActionButton();
+
+    expect(practiceButtonEl.hasClass('claudian-hidden')).toBe(false);
+    expect(practiceButtonEl.getAttribute('disabled')).toBeNull();
+    expect(practiceButtonEl.getAttribute('aria-hidden')).toBeNull();
+
+    view.tabManager.getActiveTab.mockReturnValue({
+      state: { currentConversationId: 'conv-1', isStreaming: true },
+    });
+
+    view.updateLearningActionButton();
+
+    expect(practiceButtonEl.hasClass('claudian-hidden')).toBe(true);
+    expect(practiceButtonEl.getAttribute('disabled')).toBe('true');
+    expect(practiceButtonEl.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('shows the review action when the current learning chapter is ready for review', () => {
+    const practiceButtonEl = createMockEl('button');
+    const writeNoteButtonEl = createMockEl('button');
+    const advanceSectionButtonEl = createMockEl('button');
+    const reviewLessonButtonEl = createMockEl('button');
+    const startNewLessonButtonEl = createMockEl('button');
+    const view = Object.create(ClaudianView.prototype) as any;
+
+    view.practiceButtonEl = practiceButtonEl;
+    view.writeNoteButtonEl = writeNoteButtonEl;
+    view.advanceSectionButtonEl = advanceSectionButtonEl;
+    view.reviewLessonButtonEl = reviewLessonButtonEl;
+    view.startNewLessonButtonEl = startNewLessonButtonEl;
+    view.advanceSectionButtonLabelEl = createMockEl();
+    view.tabManager = {
+      getActiveTab: jest.fn().mockReturnValue({
+        state: { currentConversationId: 'conv-1', isStreaming: false },
+      }),
+    };
+    view.plugin = {
+      learningController: {
+        canPracticeSection: jest.fn().mockReturnValue(false),
+        canWriteSectionNote: jest.fn().mockReturnValue(false),
+        canAdvanceSection: jest.fn().mockReturnValue(false),
+        canReviewLesson: jest.fn().mockReturnValue(true),
+        getAdvanceSectionLabel: jest.fn().mockReturnValue(null),
+        canStartNewLesson: jest.fn().mockReturnValue(true),
+      },
+    };
+
+    view.updateLearningActionButton();
+
+    expect(reviewLessonButtonEl.hasClass('claudian-hidden')).toBe(false);
+    expect(reviewLessonButtonEl.getAttribute('disabled')).toBeNull();
+    expect(reviewLessonButtonEl.getAttribute('aria-hidden')).toBeNull();
+    expect(startNewLessonButtonEl.hasClass('claudian-hidden')).toBe(false);
+
+    view.tabManager.getActiveTab.mockReturnValue({
+      state: { currentConversationId: 'conv-1', isStreaming: true },
+    });
+
+    view.updateLearningActionButton();
+
+    expect(reviewLessonButtonEl.hasClass('claudian-hidden')).toBe(true);
+    expect(reviewLessonButtonEl.getAttribute('disabled')).toBe('true');
+    expect(reviewLessonButtonEl.getAttribute('aria-hidden')).toBe('true');
+  });
 });
 
 describe('ClaudianView Escape handling', () => {

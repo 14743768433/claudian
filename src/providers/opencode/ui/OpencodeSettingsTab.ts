@@ -471,7 +471,7 @@ export const opencodeSettingsTabRenderer: ProviderSettingsTabRenderer = {
         } else if (modelCatalogLoadFailed) {
           emptyText = 'Could not load the OpenCode model catalog. Check the CLI path and login state, then expand this section again.';
         } else if (enriched.length === 0) {
-          emptyText = 'Start OpenCode once to load its model catalog. Claudian will then let you pick visible models.';
+          emptyText = 'Start OpenCode once to load its model catalog. AI Tutor will then let you pick visible models.';
         }
         emptyEl.setText(emptyText);
         return;

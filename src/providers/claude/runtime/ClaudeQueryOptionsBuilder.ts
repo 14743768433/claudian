@@ -32,6 +32,7 @@ export interface QueryOptionsContext {
   vaultPath: string;
   cliPath: string;
   settings: ClaudianSettings;
+  systemPromptAppendices?: string[];
   customEnv: Record<string, string>;
   enhancedPath: string;
   mcpManager: McpServerManager;
@@ -119,7 +120,9 @@ export class QueryOptionsBuilder {
       effortLevel: resolveEffortLevel(runtimeModel, ctx.settings.effortLevel),
       permissionMode: ctx.settings.permissionMode,
       sdkPermissionMode,
-      systemPromptKey: computeSystemPromptKey(systemPromptSettings),
+      systemPromptKey: computeSystemPromptKey(systemPromptSettings, {
+        appendices: ctx.systemPromptAppendices,
+      }),
       disallowedToolsKey,
       mcpServersKey: '', // Dynamic via setMcpServers, not tracked for restart
       pluginsKey,
@@ -275,7 +278,9 @@ export class QueryOptionsBuilder {
     };
     const options: Options = {
       cwd: ctx.vaultPath,
-      systemPrompt: buildSystemPrompt(systemPromptSettings),
+      systemPrompt: buildSystemPrompt(systemPromptSettings, {
+        appendices: ctx.systemPromptAppendices,
+      }),
       model,
       abortController,
       pathToClaudeCodeExecutable: ctx.cliPath,

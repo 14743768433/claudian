@@ -6,6 +6,7 @@ import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '../../core/providers/ProviderSettingsCoordinator';
 import { DEFAULT_CHAT_PROVIDER_ID, type ProviderId } from '../../core/providers/types';
 import { VIEW_TYPE_CLAUDIAN } from '../../core/types';
+import type { LearningTurnMode } from '../../features/learning/state/types';
 import type ClaudianPlugin from '../../main';
 import { createProviderIconSvg } from '../../shared/icons';
 import {
@@ -48,6 +49,15 @@ export class ClaudianView extends ItemView {
   private viewContainerEl: HTMLElement | null = null;
   private logoEl: HTMLElement | null = null;
   private newTabButtonEl: HTMLElement | null = null;
+  private practiceButtonEl: HTMLButtonElement | null = null;
+  private writeNoteButtonEl: HTMLButtonElement | null = null;
+  private advanceSectionButtonEl: HTMLButtonElement | null = null;
+  private advanceSectionButtonLabelEl: HTMLElement | null = null;
+  private reviewLessonButtonEl: HTMLButtonElement | null = null;
+  private startNewLessonButtonEl: HTMLButtonElement | null = null;
+  private learningStatusEl: HTMLElement | null = null;
+  private learningModeControlsEl: HTMLElement | null = null;
+  private readonly learningModeButtons = new Map<LearningTurnMode, HTMLButtonElement>();
 
   // Header elements
   private historyDropdown: HTMLElement | null = null;
@@ -93,11 +103,11 @@ export class ClaudianView extends ItemView {
   }
 
   getDisplayText(): string {
-    return 'Claudian';
+    return 'AI Tutor Chat';
   }
 
   getIcon(): string {
-    return 'bot';
+    return 'graduation-cap';
   }
 
   /** Refreshes model-dependent UI across all tabs (used after settings/env changes). */
@@ -196,12 +206,14 @@ export class ClaudianView extends ItemView {
           this.updateTabBar();
           this.updateHistoryDropdown();
           this.updateInputLocation();
+          this.updateLearningControls();
           this.syncProviderBrandColor();
         },
         onTabSwitched: () => {
           this.updateTabBar();
           this.updateHistoryDropdown();
           this.updateInputLocation();
+          this.updateLearningControls();
           this.persistTabState();
           this.syncProviderBrandColor();
         },
@@ -214,12 +226,14 @@ export class ClaudianView extends ItemView {
         onTabStreamingChanged: () => {
           this.updateTabBar();
           this.updateHistoryDropdown();
+          this.updateLearningControls();
         },
         onTabTitleChanged: () => this.updateTabBar(),
         onTabAttentionChanged: () => this.updateTabBar(),
         onTabConversationChanged: () => {
           this.updateTabBar();
           this.updateHistoryDropdown();
+          this.updateLearningControls();
           this.persistTabState();
           this.syncProviderBrandColor();
         },
@@ -237,6 +251,7 @@ export class ClaudianView extends ItemView {
     this.updateInputLocation();
     this.updateTabBarVisibility();
     this.tabManager?.primeProviderRuntime();
+    this.updateLearningControls();
   }
 
   async onClose() {
@@ -271,7 +286,7 @@ export class ClaudianView extends ItemView {
     this.logoEl = titleEl.createSpan({ cls: 'claudian-logo' });
     this.syncHeaderLogo(DEFAULT_CHAT_PROVIDER_ID);
 
-    titleEl.createEl('h4', { text: 'Claudian', cls: 'claudian-title-text' });
+    titleEl.createEl('h4', { text: 'AI Tutor', cls: 'claudian-title-text' });
   }
 
   /**
@@ -298,6 +313,141 @@ export class ClaudianView extends ItemView {
 
     const navActionsEl = activeDocument.createElement('div');
     navActionsEl.className = 'claudian-input-nav-actions';
+
+    this.learningModeControlsEl = activeDocument.createElement('div');
+    this.learningModeControlsEl.className = 'ai-tutor-mode-controls claudian-hidden';
+    this.learningModeControlsEl.setAttribute('aria-label', 'AI Tutor mode');
+    this.learningModeControlsEl.setAttribute('role', 'group');
+    this.learningModeButtons.clear();
+    const modes: Array<{ id: LearningTurnMode; icon: string; label: string }> = [
+      { id: 'teach', icon: 'book-open', label: 'Teach' },
+      { id: 'ask', icon: 'search', label: 'Ask' },
+      { id: 'transform', icon: 'wand-sparkles', label: 'Transform' },
+    ];
+    for (const mode of modes) {
+      const button = activeDocument.createElement('button');
+      button.type = 'button';
+      button.className = 'ai-tutor-mode-btn';
+      button.setAttribute('aria-label', `${mode.label} mode`);
+      button.setAttribute('title', `${mode.label} mode`);
+      setIcon(button, mode.icon);
+      button.createSpan({ text: mode.label });
+      button.addEventListener('click', () => {
+        const conversationId = this.tabManager?.getActiveTab()?.state.currentConversationId ?? null;
+        if (!this.plugin.learningController.setConversationTurnMode(conversationId, mode.id)) {
+          return;
+        }
+        this.updateLearningControls();
+      });
+      this.learningModeButtons.set(mode.id, button);
+      this.learningModeControlsEl.appendChild(button);
+    }
+    navActionsEl.appendChild(this.learningModeControlsEl);
+
+    this.learningStatusEl = activeDocument.createElement('div');
+    this.learningStatusEl.className = 'ai-tutor-learning-status claudian-hidden';
+    this.learningStatusEl.setAttribute('aria-live', 'polite');
+    navActionsEl.appendChild(this.learningStatusEl);
+
+    this.practiceButtonEl = activeDocument.createElement('button');
+    this.practiceButtonEl.type = 'button';
+    this.practiceButtonEl.className = 'claudian-input-nav-btn ai-tutor-practice-btn claudian-hidden';
+    setIcon(this.practiceButtonEl, 'list-checks');
+    this.practiceButtonEl.createSpan({ text: 'Practice' });
+    this.practiceButtonEl.setAttribute('aria-label', 'Practice current section');
+    this.practiceButtonEl.setAttribute('title', 'Practice current section');
+    this.practiceButtonEl.addEventListener('click', () => {
+      const conversationId = this.tabManager?.getActiveTab()?.state.currentConversationId ?? null;
+      if (!conversationId) return;
+      this.practiceButtonEl?.setAttribute('disabled', 'true');
+      void this.plugin.learningController.practiceSectionFromConversation(conversationId)
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          new Notice(`Failed to prepare practice: ${message}`);
+        })
+        .finally(() => this.updateLearningControls());
+    });
+    navActionsEl.appendChild(this.practiceButtonEl);
+
+    this.writeNoteButtonEl = activeDocument.createElement('button');
+    this.writeNoteButtonEl.type = 'button';
+    this.writeNoteButtonEl.className = 'claudian-input-nav-btn ai-tutor-write-note-btn claudian-hidden';
+    setIcon(this.writeNoteButtonEl, 'file-pen-line');
+    this.writeNoteButtonEl.createSpan({ text: 'Write note' });
+    this.writeNoteButtonEl.setAttribute('aria-label', 'Write section note');
+    this.writeNoteButtonEl.setAttribute('title', 'Write section note');
+    this.writeNoteButtonEl.addEventListener('click', () => {
+      const conversationId = this.tabManager?.getActiveTab()?.state.currentConversationId ?? null;
+      if (!conversationId) return;
+      this.writeNoteButtonEl?.setAttribute('disabled', 'true');
+      void this.plugin.learningController.writeSectionNoteFromConversation(conversationId)
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          new Notice(`Failed to write section note: ${message}`);
+        })
+        .finally(() => this.updateLearningControls());
+    });
+    navActionsEl.appendChild(this.writeNoteButtonEl);
+
+    this.advanceSectionButtonEl = activeDocument.createElement('button');
+    this.advanceSectionButtonEl.type = 'button';
+    this.advanceSectionButtonEl.className = 'claudian-input-nav-btn ai-tutor-advance-section-btn claudian-hidden';
+    setIcon(this.advanceSectionButtonEl, 'arrow-right');
+    this.advanceSectionButtonLabelEl = this.advanceSectionButtonEl.createSpan({ text: 'Next section' });
+    this.advanceSectionButtonEl.setAttribute('aria-label', 'Next section');
+    this.advanceSectionButtonEl.setAttribute('title', 'Next section');
+    this.advanceSectionButtonEl.addEventListener('click', () => {
+      const conversationId = this.tabManager?.getActiveTab()?.state.currentConversationId ?? null;
+      if (!conversationId) return;
+      this.advanceSectionButtonEl?.setAttribute('disabled', 'true');
+      void this.plugin.learningController.advanceSectionFromConversation(conversationId)
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          new Notice(`Failed to continue section: ${message}`);
+        })
+        .finally(() => this.updateLearningControls());
+    });
+    navActionsEl.appendChild(this.advanceSectionButtonEl);
+
+    this.reviewLessonButtonEl = activeDocument.createElement('button');
+    this.reviewLessonButtonEl.type = 'button';
+    this.reviewLessonButtonEl.className = 'claudian-input-nav-btn ai-tutor-review-lesson-btn claudian-hidden';
+    setIcon(this.reviewLessonButtonEl, 'clipboard-check');
+    this.reviewLessonButtonEl.createSpan({ text: 'Review' });
+    this.reviewLessonButtonEl.setAttribute('aria-label', 'Review chapter');
+    this.reviewLessonButtonEl.setAttribute('title', 'Review chapter');
+    this.reviewLessonButtonEl.addEventListener('click', () => {
+      const conversationId = this.tabManager?.getActiveTab()?.state.currentConversationId ?? null;
+      if (!conversationId) return;
+      this.reviewLessonButtonEl?.setAttribute('disabled', 'true');
+      void this.plugin.learningController.reviewLessonFromConversation(conversationId)
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          new Notice(`Failed to prepare review: ${message}`);
+        })
+        .finally(() => this.updateLearningControls());
+    });
+    navActionsEl.appendChild(this.reviewLessonButtonEl);
+
+    this.startNewLessonButtonEl = activeDocument.createElement('button');
+    this.startNewLessonButtonEl.type = 'button';
+    this.startNewLessonButtonEl.className = 'claudian-input-nav-btn ai-tutor-start-new-lesson-btn claudian-hidden';
+    setIcon(this.startNewLessonButtonEl, 'skip-forward');
+    this.startNewLessonButtonEl.createSpan({ text: 'Start new lesson' });
+    this.startNewLessonButtonEl.setAttribute('aria-label', 'Start new lesson');
+    this.startNewLessonButtonEl.setAttribute('title', 'Start new lesson');
+    this.startNewLessonButtonEl.addEventListener('click', () => {
+      const conversationId = this.tabManager?.getActiveTab()?.state.currentConversationId ?? null;
+      if (!conversationId) return;
+      this.startNewLessonButtonEl?.setAttribute('disabled', 'true');
+      void this.plugin.learningController.startNewLessonFromConversation(conversationId)
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          new Notice(`Failed to start new lesson: ${message}`);
+        })
+        .finally(() => this.updateLearningControls());
+    });
+    navActionsEl.appendChild(this.startNewLessonButtonEl);
 
     this.newTabButtonEl = navActionsEl.createDiv({ cls: 'claudian-input-nav-btn claudian-new-tab-btn' });
     setIcon(this.newTabButtonEl, 'square-plus');
@@ -398,6 +548,11 @@ export class ClaudianView extends ItemView {
   /** Refreshes tab controls after settings that affect tab availability change. */
   refreshTabControls(): void {
     this.updateTabBarVisibility();
+    this.updateLearningControls();
+  }
+
+  refreshLearningControls(): void {
+    this.updateLearningControls();
   }
 
   // ============================================
@@ -476,6 +631,120 @@ export class ClaudianView extends ItemView {
 
     this.newTabButtonEl.setAttribute('aria-disabled', 'true');
     this.newTabButtonEl.setAttribute('aria-hidden', 'true');
+  }
+
+  private updateLearningControls(): void {
+    this.updateLearningStatus();
+    this.updateLearningActionButton();
+  }
+
+  private updateLearningStatus(): void {
+    if (!this.learningStatusEl) return;
+
+    const activeTab = this.tabManager?.getActiveTab() ?? null;
+    const conversationId = activeTab?.state.currentConversationId ?? null;
+    const status = this.plugin.learningController.getConversationStatus(conversationId);
+
+    this.updateLearningModeControls(status?.turnMode ?? null);
+    this.learningStatusEl.empty();
+    this.learningStatusEl.toggleClass('claudian-hidden', !status);
+    if (!status) {
+      this.learningStatusEl.removeAttribute('title');
+      return;
+    }
+
+    this.learningStatusEl.setAttribute(
+      'title',
+      `${status.courseTitle} · ${status.chapterLabel}: ${status.lessonTitle} · ${status.sectionLabel}`,
+    );
+    this.learningStatusEl.createSpan({ cls: 'ai-tutor-learning-status-mode', text: status.mode });
+    this.learningStatusEl.createSpan({
+      cls: 'ai-tutor-learning-status-main',
+      text: `${status.chapterLabel} · ${status.lessonTitle}`,
+    });
+    this.learningStatusEl.createSpan({
+      cls: 'ai-tutor-learning-status-section',
+      text: status.sectionLabel,
+    });
+  }
+
+  private updateLearningModeControls(mode: LearningTurnMode | null): void {
+    if (!this.learningModeControlsEl) return;
+
+    this.learningModeControlsEl.toggleClass('claudian-hidden', !mode);
+    for (const [buttonMode, button] of this.learningModeButtons) {
+      const active = mode === buttonMode;
+      button.toggleClass('is-active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+  }
+
+  private updateLearningActionButton(): void {
+    if (!this.startNewLessonButtonEl || !this.advanceSectionButtonEl || !this.writeNoteButtonEl || !this.practiceButtonEl || !this.reviewLessonButtonEl) return;
+
+    const activeTab = this.tabManager?.getActiveTab() ?? null;
+    const conversationId = activeTab?.state.currentConversationId ?? null;
+    const canPractice = !activeTab?.state.isStreaming
+      && this.plugin.learningController.canPracticeSection(conversationId);
+    this.practiceButtonEl.toggleClass('claudian-hidden', !canPractice);
+    if (canPractice) {
+      this.practiceButtonEl.removeAttribute('disabled');
+      this.practiceButtonEl.removeAttribute('aria-hidden');
+    } else {
+      this.practiceButtonEl.setAttribute('disabled', 'true');
+      this.practiceButtonEl.setAttribute('aria-hidden', 'true');
+    }
+
+    const canWrite = !activeTab?.state.isStreaming
+      && this.plugin.learningController.canWriteSectionNote(conversationId);
+    this.writeNoteButtonEl.toggleClass('claudian-hidden', !canWrite);
+    if (canWrite) {
+      this.writeNoteButtonEl.removeAttribute('disabled');
+      this.writeNoteButtonEl.removeAttribute('aria-hidden');
+    } else {
+      this.writeNoteButtonEl.setAttribute('disabled', 'true');
+      this.writeNoteButtonEl.setAttribute('aria-hidden', 'true');
+    }
+
+    const canAdvance = !activeTab?.state.isStreaming
+      && this.plugin.learningController.canAdvanceSection(conversationId);
+    const advanceLabel = this.plugin.learningController.getAdvanceSectionLabel(conversationId) ?? 'Next section';
+    if (this.advanceSectionButtonLabelEl) {
+      this.advanceSectionButtonLabelEl.setText(advanceLabel);
+    }
+    this.advanceSectionButtonEl.setAttribute('aria-label', advanceLabel);
+    this.advanceSectionButtonEl.setAttribute('title', advanceLabel);
+    this.advanceSectionButtonEl.toggleClass('claudian-hidden', !canAdvance);
+    if (canAdvance) {
+      this.advanceSectionButtonEl.removeAttribute('disabled');
+      this.advanceSectionButtonEl.removeAttribute('aria-hidden');
+    } else {
+      this.advanceSectionButtonEl.setAttribute('disabled', 'true');
+      this.advanceSectionButtonEl.setAttribute('aria-hidden', 'true');
+    }
+
+    const canReview = !activeTab?.state.isStreaming
+      && this.plugin.learningController.canReviewLesson(conversationId);
+    this.reviewLessonButtonEl.toggleClass('claudian-hidden', !canReview);
+    if (canReview) {
+      this.reviewLessonButtonEl.removeAttribute('disabled');
+      this.reviewLessonButtonEl.removeAttribute('aria-hidden');
+    } else {
+      this.reviewLessonButtonEl.setAttribute('disabled', 'true');
+      this.reviewLessonButtonEl.setAttribute('aria-hidden', 'true');
+    }
+
+    const canStart = !activeTab?.state.isStreaming
+      && this.plugin.learningController.canStartNewLesson(conversationId);
+
+    this.startNewLessonButtonEl.toggleClass('claudian-hidden', !canStart);
+    if (canStart) {
+      this.startNewLessonButtonEl.removeAttribute('disabled');
+      this.startNewLessonButtonEl.removeAttribute('aria-hidden');
+    } else {
+      this.startNewLessonButtonEl.setAttribute('disabled', 'true');
+      this.startNewLessonButtonEl.setAttribute('aria-hidden', 'true');
+    }
   }
 
   /** Sets `data-provider` on the root container so CSS brand color follows the active provider. */

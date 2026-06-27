@@ -10,6 +10,16 @@ const NODE_EXECUTABLE = isWindows ? 'node.exe' : 'node';
 const DEVICE_SETTINGS_STORAGE_KEY = 'claudian.deviceSettingsKey';
 let cachedDeviceSettingsKey: string | null = null;
 
+function joinPath(first: string, ...parts: string[]): string {
+  return isWindows
+    ? path.win32.join(first, ...parts)
+    : path.posix.join(first, ...parts);
+}
+
+function dirnamePath(value: string): string {
+  return isWindows ? path.win32.dirname(value) : path.posix.dirname(value);
+}
+
 function getHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || '';
 }
@@ -20,13 +30,13 @@ function getAppProvidedCliPaths(): string[] {
   if (process.platform === 'darwin') {
     const appBundleMatch = process.execPath.match(/^(.+?\.app)\//);
     if (appBundleMatch) {
-      return [path.join(appBundleMatch[1], 'Contents', 'MacOS')];
+      return [path.posix.join(appBundleMatch[1], 'Contents', 'MacOS')];
     }
-    return [path.dirname(process.execPath)];
+    return [path.posix.dirname(process.execPath)];
   }
 
   if (process.platform === 'win32') {
-    return [path.dirname(process.execPath)];
+    return [path.win32.dirname(process.execPath)];
   }
 
   return [];
@@ -46,16 +56,16 @@ function getExtraBinaryPaths(): string[] {
 
     // Node.js / npm locations
     if (appData) {
-      paths.push(path.join(appData, 'npm'));
+      paths.push(joinPath(appData, 'npm'));
     }
     if (localAppData) {
-      paths.push(path.join(localAppData, 'Programs', 'nodejs'));
-      paths.push(path.join(localAppData, 'Programs', 'node'));
+      paths.push(joinPath(localAppData, 'Programs', 'nodejs'));
+      paths.push(joinPath(localAppData, 'Programs', 'node'));
     }
 
     // Common program locations (official Node.js installer)
-    paths.push(path.join(programFiles, 'nodejs'));
-    paths.push(path.join(programFilesX86, 'nodejs'));
+    paths.push(joinPath(programFiles, 'nodejs'));
+    paths.push(joinPath(programFilesX86, 'nodejs'));
 
     // nvm-windows: active Node.js is usually under %NVM_SYMLINK%
     const nvmSymlink = process.env.NVM_SYMLINK;
@@ -68,15 +78,15 @@ function getExtraBinaryPaths(): string[] {
     if (nvmHome) {
       paths.push(nvmHome);
     } else if (appData) {
-      paths.push(path.join(appData, 'nvm'));
+      paths.push(joinPath(appData, 'nvm'));
     }
 
     // volta: installs to %VOLTA_HOME%\bin or %USERPROFILE%\.volta\bin
     const voltaHome = process.env.VOLTA_HOME;
     if (voltaHome) {
-      paths.push(path.join(voltaHome, 'bin'));
+      paths.push(joinPath(voltaHome, 'bin'));
     } else if (home) {
-      paths.push(path.join(home, '.volta', 'bin'));
+      paths.push(joinPath(home, '.volta', 'bin'));
     }
 
     // fnm (Fast Node Manager): %FNM_MULTISHELL_PATH% is the active Node.js bin
@@ -90,37 +100,37 @@ function getExtraBinaryPaths(): string[] {
     if (fnmDir) {
       paths.push(fnmDir);
     } else if (localAppData) {
-      paths.push(path.join(localAppData, 'fnm'));
+      paths.push(joinPath(localAppData, 'fnm'));
     }
 
     // Chocolatey: %ChocolateyInstall%\bin or C:\ProgramData\chocolatey\bin
     const chocolateyInstall = process.env.ChocolateyInstall;
     if (chocolateyInstall) {
-      paths.push(path.join(chocolateyInstall, 'bin'));
+      paths.push(joinPath(chocolateyInstall, 'bin'));
     } else {
-      paths.push(path.join(programData, 'chocolatey', 'bin'));
+      paths.push(joinPath(programData, 'chocolatey', 'bin'));
     }
 
     // scoop: %SCOOP%\shims or %USERPROFILE%\scoop\shims
     const scoopDir = process.env.SCOOP;
     if (scoopDir) {
-      paths.push(path.join(scoopDir, 'shims'));
-      paths.push(path.join(scoopDir, 'apps', 'nodejs', 'current', 'bin'));
-      paths.push(path.join(scoopDir, 'apps', 'nodejs', 'current'));
+      paths.push(joinPath(scoopDir, 'shims'));
+      paths.push(joinPath(scoopDir, 'apps', 'nodejs', 'current', 'bin'));
+      paths.push(joinPath(scoopDir, 'apps', 'nodejs', 'current'));
     } else if (home) {
-      paths.push(path.join(home, 'scoop', 'shims'));
-      paths.push(path.join(home, 'scoop', 'apps', 'nodejs', 'current', 'bin'));
-      paths.push(path.join(home, 'scoop', 'apps', 'nodejs', 'current'));
+      paths.push(joinPath(home, 'scoop', 'shims'));
+      paths.push(joinPath(home, 'scoop', 'apps', 'nodejs', 'current', 'bin'));
+      paths.push(joinPath(home, 'scoop', 'apps', 'nodejs', 'current'));
     }
 
     // Docker
-    paths.push(path.join(programFiles, 'Docker', 'Docker', 'resources', 'bin'));
+    paths.push(joinPath(programFiles, 'Docker', 'Docker', 'resources', 'bin'));
 
     // User bin (if exists)
     if (home) {
-      paths.push(path.join(home, '.local', 'bin'));
-      paths.push(path.join(home, '.bun', 'bin'));
-      paths.push(path.join(home, '.opencode', 'bin'));
+      paths.push(joinPath(home, '.local', 'bin'));
+      paths.push(joinPath(home, '.bun', 'bin'));
+      paths.push(joinPath(home, '.opencode', 'bin'));
     }
 
     paths.push(...getAppProvidedCliPaths());
@@ -137,13 +147,13 @@ function getExtraBinaryPaths(): string[] {
 
     const voltaHome = process.env.VOLTA_HOME;
     if (voltaHome) {
-      paths.push(path.join(voltaHome, 'bin'));
+      paths.push(joinPath(voltaHome, 'bin'));
     }
 
     const asdfRoot = process.env.ASDF_DATA_DIR || process.env.ASDF_DIR;
     if (asdfRoot) {
-      paths.push(path.join(asdfRoot, 'shims'));
-      paths.push(path.join(asdfRoot, 'bin'));
+      paths.push(joinPath(asdfRoot, 'shims'));
+      paths.push(joinPath(asdfRoot, 'bin'));
     }
 
     const fnmMultishell = process.env.FNM_MULTISHELL_PATH;
@@ -157,14 +167,14 @@ function getExtraBinaryPaths(): string[] {
     }
 
     if (home) {
-      paths.push(path.join(home, '.local', 'bin'));
-      paths.push(path.join(home, '.bun', 'bin'));
-      paths.push(path.join(home, '.opencode', 'bin'));
-      paths.push(path.join(home, '.docker', 'bin'));
-      paths.push(path.join(home, '.volta', 'bin'));
-      paths.push(path.join(home, '.asdf', 'shims'));
-      paths.push(path.join(home, '.asdf', 'bin'));
-      paths.push(path.join(home, '.fnm'));
+      paths.push(joinPath(home, '.local', 'bin'));
+      paths.push(joinPath(home, '.bun', 'bin'));
+      paths.push(joinPath(home, '.opencode', 'bin'));
+      paths.push(joinPath(home, '.docker', 'bin'));
+      paths.push(joinPath(home, '.volta', 'bin'));
+      paths.push(joinPath(home, '.asdf', 'shims'));
+      paths.push(joinPath(home, '.asdf', 'bin'));
+      paths.push(joinPath(home, '.fnm'));
 
       // NVM: use NVM_BIN if set, otherwise resolve default version from filesystem
       const nvmBin = process.env.NVM_BIN;
@@ -195,7 +205,7 @@ export function findNodeDirectory(additionalPaths?: string): string | null {
   for (const dir of allPaths) {
     if (!dir) continue;
     try {
-      const nodePath = path.join(dir, NODE_EXECUTABLE);
+      const nodePath = joinPath(dir, NODE_EXECUTABLE);
       if (fs.existsSync(nodePath)) {
         const stat = fs.statSync(nodePath);
         if (stat.isFile()) {
@@ -213,7 +223,7 @@ export function findNodeDirectory(additionalPaths?: string): string | null {
 export function findNodeExecutable(additionalPaths?: string): string | null {
   const nodeDir = findNodeDirectory(additionalPaths);
   if (nodeDir) {
-    return path.join(nodeDir, NODE_EXECUTABLE);
+    return joinPath(nodeDir, NODE_EXECUTABLE);
   }
   return null;
 }
@@ -284,8 +294,8 @@ export function getEnhancedPath(additionalPaths?: string, cliPath?: string): str
   let cliDirHasNode = false;
   if (cliPath) {
     try {
-      const cliDir = path.dirname(cliPath);
-      const nodeInCliDir = path.join(cliDir, NODE_EXECUTABLE);
+      const cliDir = dirnamePath(cliPath);
+      const nodeInCliDir = joinPath(cliDir, NODE_EXECUTABLE);
       if (fs.existsSync(nodeInCliDir)) {
         const stat = fs.statSync(nodeInCliDir);
         if (stat.isFile()) {

@@ -11,8 +11,22 @@ import {
   TOOL_WAIT_AGENT,
   TOOL_WRITE_STDIN,
 } from '@/core/tools/toolNames';
-import type { ChatMessage, ImageAttachment } from '@/core/types';
-import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
+import type {
+  ChatMessage,
+  ImageAttachment,
+  LearningActivityContentBlock,
+  LearningActionResultContentBlock,
+  LearningLessonPlanContentBlock,
+  LearningNextStepsContentBlock,
+} from '@/core/types';
+import {
+  extractTutorActions,
+  extractNextOptions,
+  MessageRenderer,
+  stripTutorActionBlocks,
+  stripNextOptionsBlocks,
+  stripTutorProtocolBlocksForStreaming,
+} from '@/features/chat/rendering/MessageRenderer';
 import { renderStoredAsyncSubagent, renderStoredSubagent } from '@/features/chat/rendering/SubagentRenderer';
 import { renderStoredThinkingBlock } from '@/features/chat/rendering/ThinkingBlockRenderer';
 import { renderStoredToolCall } from '@/features/chat/rendering/ToolCallRenderer';
@@ -69,12 +83,15 @@ function createRenderer(
   messagesEl?: any,
   providerId: 'claude' | 'codex' = 'claude',
   settings: Record<string, unknown> = {},
+  nextOptionCallback?: (option: string) => Promise<void> | void,
 ) {
   const el = messagesEl ?? createMockEl();
   const comp = createMockComponent();
+  const openSource = jest.fn();
   const plugin = {
     app: {},
     settings: { mediaFolder: '', ...settings },
+    learningController: { openSource },
   };
   return {
     renderer: new MessageRenderer(
@@ -84,8 +101,10 @@ function createRenderer(
       undefined,
       undefined,
       mockCapabilities(providerId),
+      nextOptionCallback,
     ),
     messagesEl: el,
+    openSource,
   };
 }
 
@@ -93,6 +112,106 @@ describe('MessageRenderer', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (Menu as typeof Menu & { instances: unknown[] }).instances.length = 0;
+  });
+
+  describe('extractNextOptions', () => {
+    it('extracts English and Chinese next option lists', () => {
+      expect(extractNextOptions([
+        'Done.',
+        '',
+        'Next options:',
+        '- 继续讲深一点',
+        '- 生成第 1 节笔记',
+        '- 做一个小测',
+      ].join('\n'))).toEqual(['继续讲深一点', '生成第 1 节笔记', '做一个小测']);
+
+      expect(extractNextOptions('下一步：继续讲深一点 / 生成笔记 / 开始下一节')).toEqual([
+        '继续讲深一点',
+        '生成笔记',
+        '开始下一节',
+      ]);
+    });
+
+    it('extracts structured JSON options and strips the hidden protocol block', () => {
+      const markdown = [
+        '这一节先到这里。',
+        '',
+        '```ai-tutor-next-options',
+        '{"options":["继续讲深一点","生成第 1 节笔记","做一个小测"]}',
+        '```',
+      ].join('\n');
+
+      expect(extractNextOptions(markdown)).toEqual([
+        '继续讲深一点',
+        '生成第 1 节笔记',
+        '做一个小测',
+      ]);
+      expect(stripNextOptionsBlocks(markdown)).toBe('这一节先到这里。');
+    });
+    it('extracts structured options from generic ai fences and hides the raw JSON', () => {
+      const markdown = [
+        'Ready for the next step.',
+        '',
+        '```ai',
+        '{"options":["Continue the framework","Evaluate one book","Generate the chapter note"]}',
+        '```',
+      ].join('\n');
+
+      expect(extractNextOptions(markdown)).toEqual([
+        'Continue the framework',
+        'Evaluate one book',
+        'Generate the chapter note',
+      ]);
+      expect(stripNextOptionsBlocks(markdown)).toBe('Ready for the next step.');
+    });
+
+    it('hides dangling generic ai options fences during streaming', () => {
+      const markdown = [
+        'Ready for the next step.',
+        '',
+        '```ai',
+        '{"options":["Continue the framework"',
+      ].join('\n');
+
+      expect(stripTutorProtocolBlocksForStreaming(markdown)).toBe('Ready for the next step.');
+    });
+  });
+
+  describe('extractTutorActions', () => {
+    it('summarizes structured learning actions without exposing raw JSON', () => {
+      const markdown = [
+        '本章计划如下。',
+        '',
+        '```ai-tutor-action',
+        '{"type":"planChapter","title":"Filters","sections":[{"title":"Low-pass intuition"},{"title":"Cutoff frequency"}]}',
+        '```',
+      ].join('\n');
+
+      expect(extractTutorActions(markdown)).toEqual([
+        { type: 'planChapter', label: 'Plan chapter', detail: 'Filters · 2 sections' },
+      ]);
+      expect(stripTutorActionBlocks(markdown)).toBe('本章计划如下。');
+    });
+
+    it('summarizes syllabus, note, section, and lesson actions', () => {
+      const markdown = [
+        '```ai-tutor-action',
+        '[',
+        '{"type":"generateSyllabus","topics":[{"title":"A"},{"title":"B"}]},',
+        '{"type":"sectionNoteWritten","notePath":"AI Tutor/Courses/running/part-1.md"},',
+        '{"type":"advanceSection"},',
+        '{"type":"startNewLesson"}',
+        ']',
+        '```',
+      ].join('\n');
+
+      expect(extractTutorActions(markdown)).toEqual([
+        { type: 'generateSyllabus', label: 'Save course map', detail: '2 topics' },
+        { type: 'sectionNoteWritten', label: 'Register section note', detail: 'AI Tutor/Courses/running/part-1.md' },
+        { type: 'advanceSection', label: 'Advance section' },
+        { type: 'startNewLesson', label: 'Start new lesson' },
+      ]);
+    });
   });
 
   // ============================================
@@ -185,6 +304,433 @@ describe('MessageRenderer', () => {
     const interruptedEl = lastChild.children[0];
     expect(interruptedEl.hasClass('claudian-interrupted')).toBe(true);
     expect(interruptedEl.textContent).toBe('Interrupted');
+  });
+
+  it('renders clickable Next options chips for assistant messages', () => {
+    const onNextOption = jest.fn();
+    const { renderer, messagesEl } = createRenderer(undefined, 'claude', {}, onNextOption);
+    const msg: ChatMessage = {
+      id: 'assistant-next',
+      role: 'assistant',
+      content: [
+        '这一节先到这里。',
+        '',
+        'Next options:',
+        '- 继续讲深一点',
+        '- 生成第 1 节笔记',
+      ].join('\n'),
+      timestamp: Date.now(),
+    };
+
+    renderer.renderStoredMessage(msg);
+
+    const chips = messagesEl.querySelectorAll('.claudian-next-option-chip');
+    expect(chips).toHaveLength(2);
+    expect(chips[0].textContent).toBe('继续讲深一点');
+
+    chips[0].click();
+
+    expect(onNextOption).toHaveBeenCalledWith('继续讲深一点');
+    expect(chips[0].getAttribute('disabled')).toBe('true');
+  });
+
+  it('renders structured Next options as chips without showing the protocol fence', () => {
+    const onNextOption = jest.fn();
+    const { renderer, messagesEl } = createRenderer(undefined, 'claude', {}, onNextOption);
+    const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    const msg: ChatMessage = {
+      id: 'assistant-next-structured',
+      role: 'assistant',
+      content: [
+        '这一节先到这里。',
+        '',
+        '```ai-tutor-next-options',
+        '{"options":["继续讲深一点","生成第 1 节笔记"]}',
+        '```',
+      ].join('\n'),
+      timestamp: Date.now(),
+    };
+
+    renderer.renderStoredMessage(msg);
+
+    expect(renderContentSpy).toHaveBeenCalledWith(expect.anything(), '这一节先到这里。');
+    expect(renderContentSpy).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining('ai-tutor-next-options'),
+    );
+    expect(messagesEl.querySelectorAll('.claudian-next-option-chip')).toHaveLength(2);
+  });
+
+  it('renders persisted learning next-step chips and routes clicks through the next-option callback', () => {
+    const onNextOption = jest.fn();
+    const { renderer, messagesEl } = createRenderer(undefined, 'claude', {}, onNextOption);
+    const nextSteps: LearningNextStepsContentBlock = {
+      type: 'learning_next_steps',
+      label: 'Next',
+      detail: 'Chapter 1 review complete',
+      options: ['Start new lesson', '复盘本章', '我还有一个问题'],
+    };
+    const msg: ChatMessage = {
+      id: 'assistant-review-next',
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      contentBlocks: [nextSteps],
+    };
+
+    renderer.renderStoredMessage(msg);
+
+    const row = messagesEl.querySelector('.claudian-next-options');
+    expect(row).not.toBeNull();
+    expect(row?.classList.contains('is-learning-next-steps')).toBe(true);
+    expect(row?.querySelector('.claudian-next-options-detail')?.textContent).toBe('Chapter 1 review complete');
+    const chips = messagesEl.querySelectorAll('.claudian-next-option-chip');
+    expect(chips).toHaveLength(3);
+    expect(chips[0].textContent).toBe('Start new lesson');
+
+    chips[0].click();
+
+    expect(onNextOption).toHaveBeenCalledWith('Start new lesson');
+  });
+
+  it('renders learning action cards without showing the protocol fence', () => {
+    const { renderer, messagesEl } = createRenderer();
+    const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    const msg: ChatMessage = {
+      id: 'assistant-action',
+      role: 'assistant',
+      content: [
+        '我已经规划好这一章。',
+        '',
+        '```ai-tutor-action',
+        '{"type":"planChapter","title":"Filters","sections":[{"title":"Low-pass intuition"},{"title":"Cutoff frequency"}]}',
+        '```',
+      ].join('\n'),
+      timestamp: Date.now(),
+    };
+
+    renderer.renderStoredMessage(msg);
+
+    expect(renderContentSpy).toHaveBeenCalledWith(expect.anything(), '我已经规划好这一章。');
+    expect(renderContentSpy).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining('ai-tutor-action'),
+    );
+    const actionCards = messagesEl.querySelectorAll('.claudian-tutor-action-card');
+    expect(actionCards).toHaveLength(1);
+    expect(actionCards[0].querySelector('.claudian-tutor-action-kicker')?.textContent).toBe('AI Tutor - Requested');
+    expect(actionCards[0].querySelector('.claudian-tutor-action-label')?.textContent).toBe('Plan chapter');
+    expect(actionCards[0].querySelector('.claudian-tutor-action-detail')?.textContent).toBe('Filters · 2 sections');
+  });
+
+  it('hides wrapped learning action JSON from generic ai code fences', () => {
+    const { renderer, messagesEl } = createRenderer();
+    const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    const msg: ChatMessage = {
+      id: 'assistant-action-ai-fence',
+      role: 'assistant',
+      content: [
+        '课程计划已经准备好了。',
+        '',
+        '```ai',
+        JSON.stringify({
+          type: 'planChapter',
+          data: {
+            title: '在AI时代高效阅读',
+            overview: 'Build a decision framework before reading.',
+            sections: [
+              { title: 'AI时代为什么还要读书？' },
+              { title: '如何快速判断一本书是否值得读？' },
+            ],
+          },
+        }),
+        '```',
+      ].join('\n'),
+      timestamp: Date.now(),
+    };
+
+    renderer.renderStoredMessage(msg);
+
+    expect(renderContentSpy).toHaveBeenCalledWith(expect.anything(), '课程计划已经准备好了。');
+    expect(renderContentSpy).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining('"type":"planChapter"'),
+    );
+    const actionCards = messagesEl.querySelectorAll('.claudian-tutor-action-card');
+    expect(actionCards).toHaveLength(1);
+    expect(actionCards[0].querySelector('.claudian-tutor-action-label')?.textContent).toBe('Plan chapter');
+    expect(actionCards[0].querySelector('.claudian-tutor-action-detail')?.textContent).toBe('在AI时代高效阅读 · 2 sections');
+  });
+
+  it('renders persisted learning action results and suppresses requested duplicates', () => {
+    const { renderer, messagesEl } = createRenderer();
+    const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    const msg: ChatMessage = {
+      id: 'assistant-action-result',
+      role: 'assistant',
+      content: [
+        'Plan saved.',
+        '',
+        '```ai-tutor-action',
+        '{"type":"planChapter","title":"Filters","sections":[{"title":"Low-pass intuition"}]}',
+        '```',
+      ].join('\n'),
+      timestamp: Date.now(),
+      contentBlocks: [
+        {
+          type: 'text',
+          content: 'Plan saved.\n\n```ai-tutor-action\n{"type":"planChapter","title":"Filters","sections":[{"title":"Low-pass intuition"}]}\n```',
+        },
+        {
+          type: 'learning_action_result',
+          actionType: 'planChapter',
+          label: 'Plan chapter',
+          status: 'accepted',
+          detail: 'Filters - 1 sections',
+          message: 'Chapter plan saved.',
+          items: ['Low-pass intuition'],
+        },
+      ],
+    };
+
+    renderer.renderStoredMessage(msg);
+
+    expect(renderContentSpy).toHaveBeenCalledWith(expect.anything(), 'Plan saved.');
+    const actionCards = messagesEl.querySelectorAll('.claudian-tutor-action-card');
+    expect(actionCards).toHaveLength(1);
+    expect(actionCards[0].querySelector('.claudian-tutor-action-kicker')?.textContent).toBe('AI Tutor - Accepted');
+    expect(actionCards[0].querySelector('.claudian-tutor-action-label')?.textContent).toBe('Plan chapter');
+    expect(actionCards[0].querySelector('.claudian-tutor-action-message')?.textContent).toBe('Chapter plan saved.');
+    const planItems = actionCards[0].querySelector('.claudian-tutor-action-items');
+    expect(planItems?.children[0]?.textContent).toBe('Low-pass intuition');
+  });
+
+  it('appends live learning action results to the streaming assistant message', () => {
+    const { renderer, messagesEl } = createRenderer();
+    const msg: ChatMessage = {
+      id: 'assistant-live-action-result',
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      contentBlocks: [],
+    };
+    const outcomeBlocks: LearningActionResultContentBlock[] = [{
+      type: 'learning_action_result',
+      actionType: 'startNewLesson',
+      label: 'Start new lesson',
+      status: 'accepted',
+      message: 'New lesson conversation opened.',
+      items: ['Continuity check', 'First concept'],
+    }];
+
+    renderer.addMessage(msg);
+    renderer.appendLearningActionResults(msg.id, outcomeBlocks);
+
+    const actionCards = messagesEl.querySelectorAll('.claudian-tutor-action-card');
+    expect(actionCards).toHaveLength(1);
+    expect(actionCards[0].querySelector('.claudian-tutor-action-kicker')?.textContent).toBe('AI Tutor - Accepted');
+    expect(actionCards[0].querySelector('.claudian-tutor-action-label')?.textContent).toBe('Start new lesson');
+    const lessonItems = actionCards[0].querySelector('.claudian-tutor-action-items');
+    expect(lessonItems?.children[0]?.textContent).toBe('Continuity check');
+  });
+
+  it('renders persisted lesson plan cards with clickable sources and next lesson summary', () => {
+    const { renderer, messagesEl, openSource } = createRenderer();
+    const msg: ChatMessage = {
+      id: 'assistant-lesson-plan',
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      contentBlocks: [{
+        type: 'learning_lesson_plan',
+        title: 'Filters',
+        detail: 'Chapter 1',
+        overview: 'Build intuition before formulas.',
+        parts: [{
+          title: 'Low-pass intuition',
+          status: 'current',
+          description: 'Understand what low-pass filters keep and remove.',
+          bulletPoints: ['Cut high-frequency noise', 'Keep slow signal trend'],
+          sources: [{ label: 'Filter notes', path: 'sources/filter-notes.md' }],
+        }, {
+          title: 'Cutoff frequency',
+          status: 'pending',
+        }],
+        nextLessonSummary: 'Next we will move into sampling.',
+      }],
+    };
+
+    renderer.renderStoredMessage(msg);
+
+    const cards = messagesEl.querySelectorAll('.claudian-lesson-plan-card');
+    expect(cards).toHaveLength(1);
+    expect(cards[0].querySelector('.claudian-lesson-plan-kicker')?.textContent).toBe('AI Tutor - Lesson plan');
+    expect(cards[0].querySelector('.claudian-lesson-plan-title')?.textContent).toBe('Filters');
+    expect(cards[0].querySelector('.claudian-lesson-plan-overview')?.textContent).toBe('Build intuition before formulas.');
+    expect(cards[0].querySelector('.claudian-lesson-plan-part-title')?.textContent).toBe('Low-pass intuition');
+    expect(cards[0].querySelector('.claudian-lesson-plan-bullets')?.children[0]?.textContent).toBe('Cut high-frequency noise');
+    expect(cards[0].querySelector('.claudian-lesson-plan-source')?.textContent).toBe('Filter notes');
+    expect(cards[0].querySelector('.claudian-lesson-plan-next-text')?.textContent).toBe('Next we will move into sampling.');
+
+    (cards[0].querySelector('.claudian-lesson-plan-source') as HTMLElement | null)?.click();
+
+    expect(openSource).toHaveBeenCalledWith({ label: 'Filter notes', path: 'sources/filter-notes.md' });
+  });
+
+  it('appends live lesson plan cards to a streaming assistant message', () => {
+    const { renderer, messagesEl } = createRenderer();
+    const msg: ChatMessage = {
+      id: 'assistant-live-lesson-plan',
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      contentBlocks: [],
+    };
+    const plan: LearningLessonPlanContentBlock = {
+      type: 'learning_lesson_plan',
+      title: 'FrameworkBase.hpp',
+      parts: [{ title: 'Runtime type system', status: 'current' }],
+    };
+
+    renderer.addMessage(msg);
+    renderer.appendLearningLessonPlans(msg.id, [plan]);
+
+    const cards = messagesEl.querySelectorAll('.claudian-lesson-plan-card');
+    expect(cards).toHaveLength(1);
+    expect(cards[0].querySelector('.claudian-lesson-plan-title')?.textContent).toBe('FrameworkBase.hpp');
+  });
+
+  it('appends live learning next-step chips to a streaming assistant message', () => {
+    const onNextOption = jest.fn();
+    const { renderer, messagesEl } = createRenderer(undefined, 'claude', {}, onNextOption);
+    const msg: ChatMessage = {
+      id: 'assistant-live-next-steps',
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      contentBlocks: [],
+    };
+    const block: LearningNextStepsContentBlock = {
+      type: 'learning_next_steps',
+      detail: 'Chapter 2 review complete',
+      options: ['Start new lesson'],
+    };
+
+    renderer.addMessage(msg);
+    renderer.appendLearningNextSteps(msg.id, [block]);
+
+    const row = messagesEl.querySelector('.claudian-next-options');
+    expect(row).not.toBeNull();
+    expect(row?.classList.contains('is-learning-next-steps')).toBe(true);
+    expect(row?.querySelector('.claudian-next-option-chip')?.textContent).toBe('Start new lesson');
+  });
+
+  it('renders learning activity cards for orchestrated provider turns', () => {
+    const { renderer, messagesEl } = createRenderer();
+    const msg: ChatMessage = {
+      id: 'assistant-activity',
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      contentBlocks: [{
+        type: 'learning_activity',
+        label: 'Planning chapter',
+        status: 'running',
+        detail: 'Chapter 2: Endurance base',
+        items: ['Read continuity', 'Plan 3-6 sections'],
+      }],
+    };
+
+    renderer.renderStoredMessage(msg);
+
+    const cards = messagesEl.querySelectorAll('.claudian-learning-activity-card');
+    expect(cards).toHaveLength(1);
+    expect(cards[0].querySelector('.claudian-learning-activity-kicker')?.textContent).toBe('AI Tutor - Working');
+    expect(cards[0].querySelector('.claudian-learning-activity-label')?.textContent).toBe('Planning chapter');
+    expect(cards[0].querySelector('.claudian-learning-activity-detail')?.textContent).toBe('Chapter 2: Endurance base');
+    expect(cards[0].querySelector('.claudian-learning-activity-items')?.children[0]?.textContent).toBe('Read continuity');
+  });
+
+  it('appends live learning activity cards to a streaming assistant message', () => {
+    const { renderer, messagesEl } = createRenderer();
+    const msg: ChatMessage = {
+      id: 'assistant-live-activity',
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      contentBlocks: [],
+    };
+    const activity: LearningActivityContentBlock = {
+      type: 'learning_activity',
+      label: 'Starting next section',
+      status: 'running',
+      detail: 'Section 2/3: Cutoff frequency',
+    };
+
+    renderer.addMessage(msg);
+    renderer.appendLearningActivity(msg.id, activity);
+
+    const cards = messagesEl.querySelectorAll('.claudian-learning-activity-card');
+    expect(cards).toHaveLength(1);
+    expect(cards[0].querySelector('.claudian-learning-activity-label')?.textContent).toBe('Starting next section');
+  });
+
+  it('updates live learning activity cards when the activity finishes', () => {
+    const { renderer, messagesEl } = createRenderer();
+    const msg: ChatMessage = {
+      id: 'assistant-live-activity-done',
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      contentBlocks: [],
+    };
+    const activity: LearningActivityContentBlock = {
+      type: 'learning_activity',
+      label: 'Planning chapter',
+      status: 'running',
+      detail: 'Chapter 2: Filters',
+    };
+
+    renderer.addMessage(msg);
+    renderer.appendLearningActivity(msg.id, activity);
+    renderer.appendLearningActivity(msg.id, { ...activity, status: 'done' });
+
+    const cards = messagesEl.querySelectorAll('.claudian-learning-activity-card');
+    const finalCard = cards[cards.length - 1];
+    expect(finalCard.classList.contains('is-done')).toBe(true);
+    expect(finalCard.querySelector('.claudian-learning-activity-kicker')?.textContent).toBe('AI Tutor - Done');
+  });
+
+  it('renders stopped and error learning activity states', () => {
+    const { renderer, messagesEl } = createRenderer();
+
+    renderer.renderStoredMessage({
+      id: 'assistant-stopped-activity',
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      contentBlocks: [{
+        type: 'learning_activity',
+        label: 'Starting next section',
+        status: 'stopped',
+      }],
+    });
+    renderer.renderStoredMessage({
+      id: 'assistant-error-activity',
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      contentBlocks: [{
+        type: 'learning_activity',
+        label: 'Planning chapter',
+        status: 'error',
+      }],
+    });
+
+    const cards = messagesEl.querySelectorAll('.claudian-learning-activity-card');
+    expect(cards).toHaveLength(2);
+    expect(cards[0].querySelector('.claudian-learning-activity-kicker')?.textContent).toBe('AI Tutor - Stopped');
+    expect(cards[1].querySelector('.claudian-learning-activity-kicker')?.textContent).toBe('AI Tutor - Error');
   });
 
   it('renders bare interrupt marker for empty interrupted assistant message', () => {
@@ -509,7 +1055,7 @@ describe('MessageRenderer', () => {
 
     renderer.renderStoredMessage(msg);
 
-    expect(renderStoredThinkingBlock).toHaveBeenCalled();
+    expect(renderStoredThinkingBlock).not.toHaveBeenCalled();
     expect(renderContentSpy).toHaveBeenCalledWith(expect.anything(), 'Text block');
     // TodoWrite is not rendered inline - only in bottom panel
     expect(renderStoredWriteEdit).toHaveBeenCalled();
@@ -2039,11 +2585,11 @@ describe('MessageRenderer', () => {
   });
 
   // ============================================
-  // renderStoredThinkingBlock - durationSeconds parameter
+  // Stored thinking blocks are hidden from the chat surface
   // ============================================
 
-  describe('renderStoredThinkingBlock - durationSeconds parameter', () => {
-    it('should pass durationSeconds to renderStoredThinkingBlock', () => {
+  describe('stored thinking block visibility', () => {
+    it('does not render a stored thinking-only assistant message', () => {
       const messagesEl = createMockEl();
       const { renderer } = createRenderer(messagesEl);
       jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
@@ -2062,39 +2608,32 @@ describe('MessageRenderer', () => {
 
       renderer.renderStoredMessage(msg);
 
-      expect(renderStoredThinkingBlock).toHaveBeenCalledWith(
-        expect.anything(),
-        'deep thought',
-        42,
-        expect.any(Function)
-      );
+      expect(renderStoredThinkingBlock).not.toHaveBeenCalled();
+      expect(messagesEl.children.length).toBe(0);
     });
 
-    it('should pass undefined durationSeconds when not set', () => {
+    it('renders visible text while suppressing adjacent stored thinking', () => {
       const messagesEl = createMockEl();
       const { renderer } = createRenderer(messagesEl);
-      jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+      const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
       (renderStoredThinkingBlock as jest.Mock).mockClear();
 
       const msg: ChatMessage = {
         id: 'm1',
         role: 'assistant',
-        content: '',
+        content: 'Visible answer',
         timestamp: Date.now(),
         contentBlocks: [
           { type: 'thinking', content: 'thought without duration' } as any,
+          { type: 'text', content: 'Visible answer' } as any,
         ],
       };
 
       renderer.renderStoredMessage(msg);
 
-      expect(renderStoredThinkingBlock).toHaveBeenCalledWith(
-        expect.anything(),
-        'thought without duration',
-        undefined,
-        expect.any(Function)
-      );
+      expect(renderStoredThinkingBlock).not.toHaveBeenCalled();
+      expect(renderContentSpy).toHaveBeenCalledWith(expect.anything(), 'Visible answer');
     });
   });
 });

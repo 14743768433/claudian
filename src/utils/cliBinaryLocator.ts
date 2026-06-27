@@ -20,7 +20,7 @@ export function resolveConfiguredCliPath(configuredPath: string | undefined): st
 
   try {
     const expandedPath = expandHomePath(trimmed);
-    return isExistingFile(expandedPath) ? expandedPath : null;
+    return resolveExistingFileCandidate(expandedPath);
   } catch {
     return null;
   }
@@ -42,9 +42,10 @@ export function findCliBinaryPath(
     if (!dir) continue;
 
     for (const candidateName of binaryNames) {
-      const candidate = path.join(dir, candidateName);
-      if (isExistingFile(candidate)) {
-        return candidate;
+      const candidate = joinForDirectory(dir, candidateName);
+      const resolvedCandidate = resolveExistingFileCandidate(candidate);
+      if (resolvedCandidate) {
+        return resolvedCandidate;
       }
     }
   }
@@ -55,6 +56,10 @@ export function findCliBinaryPath(
 function parsePathEntriesForPlatform(pathValue: string | undefined, platform: NodeJS.Platform): string[] {
   if (!pathValue) {
     return [];
+  }
+
+  if (platform !== 'win32' && /^[A-Za-z]:[\\/]/.test(pathValue.trim())) {
+    return [expandHomePath(stripSurroundingQuotes(pathValue.trim()))];
   }
 
   const delimiter = platform === 'win32' ? ';' : ':';
@@ -84,14 +89,35 @@ function translateMsysPathForPlatform(value: string, platform: NodeJS.Platform):
     return value;
   }
 
-  const msysMatch = value.match(/^\/([a-zA-Z])(?:\/(.*))?$/);
+  const msysMatch = value.match(/^\/([c-zC-Z])\/(.+)$/);
   if (!msysMatch) {
     return value;
   }
 
   const driveLetter = msysMatch[1].toUpperCase();
   const restOfPath = msysMatch[2] ?? '';
-  return restOfPath
-    ? `${driveLetter}:\\${restOfPath.replace(/\//g, '\\')}`
-    : `${driveLetter}:`;
+  return `${driveLetter}:\\${restOfPath.replace(/\//g, '\\')}`;
+}
+
+function resolveExistingFileCandidate(candidate: string): string | null {
+  if (isExistingFile(candidate)) {
+    return candidate;
+  }
+
+  if (process.platform !== 'win32' || !candidate.startsWith('/')) {
+    return null;
+  }
+
+  const nativeCandidate = path.win32.normalize(candidate);
+  if (nativeCandidate !== candidate && isExistingFile(nativeCandidate)) {
+    return nativeCandidate;
+  }
+
+  return null;
+}
+
+function joinForDirectory(dir: string, child: string): string {
+  return /^[A-Za-z]:(?:[\\/]|$)/.test(dir) || dir.includes('\\')
+    ? path.win32.join(dir, child)
+    : path.posix.join(dir, child);
 }

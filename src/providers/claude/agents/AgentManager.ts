@@ -132,6 +132,15 @@ export class AgentManager {
   }
 
   private listMarkdownFiles(dir: string): string[] {
+    const nativeFiles = this.listMarkdownFilesOnce(dir);
+    if (nativeFiles.length > 0 || !dir.includes('\\')) {
+      return nativeFiles;
+    }
+
+    return this.listMarkdownFilesOnce(dir.replace(/\\/g, '/'));
+  }
+
+  private listMarkdownFilesOnce(dir: string): string[] {
     const files: string[] = [];
 
     try {

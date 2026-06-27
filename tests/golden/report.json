@@ -1,0 +1,262 @@
+{
+  "generatedAt": "2026-06-27T11:35:16.307Z",
+  "skill": {
+    "path": "D:\\claudian\\skills\\lesson-page-generation\\SKILL.md",
+    "hash": "f79082065b6581959309115c0bc7c811dffd896734b3548cee2a70f6c83b5918",
+    "bytes": 5381
+  },
+  "runner": {
+    "blindCommand": "node scripts/blind-candidate-local.mjs",
+    "benchmarkRoot": "D:\\claudian\\tests\\golden\\heptabase",
+    "candidateRoot": "D:\\claudian\\tests\\golden\\blind-candidates"
+  },
+  "passThreshold": 6.5,
+  "strictCandidateGate": {
+    "minOverall": 8,
+    "minAverage": 8.5,
+    "dimensionFloor": 6.5
+  },
+  "dimensions": [
+    "narrativeDepth",
+    "structureClarity",
+    "visualAids",
+    "practicality",
+    "explanationDepth",
+    "assessmentLoop",
+    "sourceGrounding",
+    "voiceSharpness"
+  ],
+  "benchmark": {
+    "kind": "benchmark",
+    "target": "D:\\claudian\\tests\\golden\\heptabase",
+    "fileCount": 3,
+    "averageOverall": 7.7,
+    "passThreshold": 6.5,
+    "files": [
+      {
+        "file": "roadmap.md",
+        "overall": 7.5,
+        "checks": {
+          "narrativeDepth": {
+            "score": 10,
+            "reason": "2902 chars and 14 substantial paragraphs"
+          },
+          "structureClarity": {
+            "score": 10,
+            "reason": "5 h2 headings and 9 h3 headings"
+          },
+          "visualAids": {
+            "score": 6,
+            "reason": "prose-only (acceptable, no enhancing aid)"
+          },
+          "practicality": {
+            "score": 8.1,
+            "reason": "2 practice signals"
+          },
+          "explanationDepth": {
+            "score": 7.3,
+            "reason": "6 causal/explanatory markers"
+          },
+          "assessmentLoop": {
+            "score": 4.6,
+            "reason": "1 review or assessment markers"
+          },
+          "sourceGrounding": {
+            "score": 6.7,
+            "reason": "1 source blocks and 6 citation markers"
+          },
+          "voiceSharpness": {
+            "score": 7.5,
+            "reason": "1 analogies, 33 concrete figures, 5 voice markers, 0 slop phrases"
+          }
+        },
+        "gaps": [
+          "visualAids: prose-only (acceptable, no enhancing aid)",
+          "assessmentLoop: 1 review or assessment markers"
+        ]
+      },
+      {
+        "file": "tech-pipeline.md",
+        "overall": 8.2,
+        "checks": {
+          "narrativeDepth": {
+            "score": 10,
+            "reason": "2902 chars and 19 substantial paragraphs"
+          },
+          "structureClarity": {
+            "score": 10,
+            "reason": "6 h2 headings and 12 h3 headings"
+          },
+          "visualAids": {
+            "score": 6,
+            "reason": "prose-only (acceptable, no enhancing aid)"
+          },
+          "practicality": {
+            "score": 8.1,
+            "reason": "2 practice signals"
+          },
+          "explanationDepth": {
+            "score": 7.3,
+            "reason": "6 causal/explanatory markers"
+          },
+          "assessmentLoop": {
+            "score": 7,
+            "reason": "5 review or assessment markers"
+          },
+          "sourceGrounding": {
+            "score": 9.4,
+            "reason": "2 source blocks and 13 citation markers"
+          },
+          "voiceSharpness": {
+            "score": 7.9,
+            "reason": "3 analogies, 40 concrete figures, 2 voice markers, 0 slop phrases"
+          }
+        },
+        "gaps": [
+          "visualAids: prose-only (acceptable, no enhancing aid)"
+        ]
+      },
+      {
+        "file": "two-subprojects.md",
+        "overall": 7.5,
+        "checks": {
+          "narrativeDepth": {
+            "score": 10,
+            "reason": "2567 chars and 10 substantial paragraphs"
+          },
+          "structureClarity": {
+            "score": 9.5,
+            "reason": "4 h2 headings and 6 h3 headings"
+          },
+          "visualAids": {
+            "score": 6,
+            "reason": "prose-only (acceptable, no enhancing aid)"
+          },
+          "practicality": {
+            "score": 6.3,
+            "reason": "1 practice signals"
+          },
+          "explanationDepth": {
+            "score": 6.2,
+            "reason": "4 causal/explanatory markers"
+          },
+          "assessmentLoop": {
+            "score": 4.6,
+            "reason": "1 review or assessment markers"
+          },
+          "sourceGrounding": {
+            "score": 9.4,
+            "reason": "2 source blocks and 22 citation markers"
+          },
+          "voiceSharpness": {
+            "score": 7.9,
+            "reason": "3 analogies, 55 concrete figures, 2 voice markers, 0 slop phrases"
+          }
+        },
+        "gaps": [
+          "visualAids: prose-only (acceptable, no enhancing aid)",
+          "practicality: 1 practice signals",
+          "explanationDepth: 4 causal/explanatory markers",
+          "assessmentLoop: 1 review or assessment markers"
+        ]
+      }
+    ]
+  },
+  "candidates": {
+    "kind": "candidate",
+    "target": "D:\\claudian\\tests\\golden\\blind-candidates",
+    "fileCount": 1,
+    "averageOverall": 8.6,
+    "passThreshold": 6.5,
+    "files": [
+      {
+        "file": "linux-ai-pipeline.md",
+        "overall": 8.6,
+        "checks": {
+          "narrativeDepth": {
+            "score": 10,
+            "reason": "1281 chars and 10 substantial paragraphs"
+          },
+          "structureClarity": {
+            "score": 8,
+            "reason": "5 h2 headings and 0 h3 headings"
+          },
+          "visualAids": {
+            "score": 9.2,
+            "reason": "3 visual aid signals (credited up to 2)"
+          },
+          "practicality": {
+            "score": 9.9,
+            "reason": "3 practice signals"
+          },
+          "explanationDepth": {
+            "score": 8.4,
+            "reason": "8 causal/explanatory markers"
+          },
+          "assessmentLoop": {
+            "score": 7.6,
+            "reason": "6 review or assessment markers"
+          },
+          "sourceGrounding": {
+            "score": 7.9,
+            "reason": "2 source blocks and 6 citation markers"
+          },
+          "voiceSharpness": {
+            "score": 7.9,
+            "reason": "2 analogies, 10 concrete figures, 4 voice markers, 0 slop phrases"
+          }
+        },
+        "gaps": []
+      }
+    ]
+  },
+  "comparison": {
+    "averageGap": 0.9,
+    "benchmarkAverage": 7.7,
+    "candidateAverage": 8.6
+  },
+  "stability": {
+    "status": "pending",
+    "reason": "need 2 distinct skill versions, found 1",
+    "requiredVersions": 2,
+    "distinctVersionsFound": 1,
+    "maxRegression": 0,
+    "current": {
+      "generatedAt": "2026-06-27T11:35:16.307Z",
+      "skillHash": "f79082065b6581959309115c0bc7c811dffd896734b3548cee2a70f6c83b5918",
+      "skillBytes": 5381,
+      "candidateAverage": 8.6,
+      "dimensionAverages": {
+        "narrativeDepth": 10,
+        "structureClarity": 8,
+        "visualAids": 9.2,
+        "practicality": 9.9,
+        "explanationDepth": 8.4,
+        "assessmentLoop": 7.6,
+        "sourceGrounding": 7.9,
+        "voiceSharpness": 7.9
+      },
+      "strictCandidateGatePassed": true
+    },
+    "versions": [
+      {
+        "generatedAt": "2026-06-27T11:35:16.307Z",
+        "skillHash": "f79082065b6581959309115c0bc7c811dffd896734b3548cee2a70f6c83b5918",
+        "skillBytes": 5381,
+        "candidateAverage": 8.6,
+        "dimensionAverages": {
+          "narrativeDepth": 10,
+          "structureClarity": 8,
+          "visualAids": 9.2,
+          "practicality": 9.9,
+          "explanationDepth": 8.4,
+          "assessmentLoop": 7.6,
+          "sourceGrounding": 7.9,
+          "voiceSharpness": 7.9
+        },
+        "strictCandidateGatePassed": true
+      }
+    ],
+    "failures": []
+  }
+}

@@ -120,6 +120,9 @@ export class SessionStorage {
       enabledMcpServers: conversation.enabledMcpServers,
       usage: conversation.usage,
       resumeAtMessageId: conversation.resumeAtMessageId,
+      uiMessageBlocks: conversation.uiMessageBlocks && Object.keys(conversation.uiMessageBlocks).length > 0
+        ? conversation.uiMessageBlocks
+        : undefined,
     };
   }
 

@@ -181,7 +181,7 @@ function getSubagentSidecarPath(
   }
 
   const encodedVault = encodeVaultPathForSDK(vaultPath);
-  return path.join(
+  return joinPathLike(
     getSDKProjectsPath(),
     encodedVault,
     sessionId,
@@ -236,6 +236,12 @@ export async function loadSubagentToolCalls(
   } catch {
     return [];
   }
+}
+
+function joinPathLike(first: string, ...parts: string[]): string {
+  return /^[A-Za-z]:(?:[\\/]|$)/.test(first) || first.includes('\\')
+    ? path.win32.join(first, ...parts)
+    : path.posix.join(first, ...parts);
 }
 
 export async function loadSubagentFinalResult(

@@ -1261,6 +1261,7 @@ export function initializeTabControllers(
       ? (id) => handleForkRequest(tab, plugin, id, forkRequestCallback)
       : undefined,
     () => getTabCapabilities(tab, plugin),
+    (option) => tab.controllers.inputController?.sendMessage({ content: option }),
   );
 
   // Selection controller

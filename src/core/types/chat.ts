@@ -27,12 +27,77 @@ export interface ImageAttachment {
   source: 'file' | 'paste' | 'drop';
 }
 
+/** Display-only result emitted after a learning action request is processed. */
+export type LearningActionResultContentBlock = {
+  type: 'learning_action_result';
+  actionType: string;
+  label: string;
+  status: 'accepted' | 'rejected';
+  detail?: string;
+  message?: string;
+  items?: string[];
+};
+
+/** Display-only activity emitted by the learning orchestrator before a provider turn. */
+export type LearningActivityContentBlock = {
+  type: 'learning_activity';
+  label: string;
+  status: 'running' | 'done' | 'error' | 'stopped';
+  detail?: string;
+  items?: string[];
+};
+
+export type LearningLessonPlanPart = {
+  title: string;
+  status?: 'current' | 'pending' | 'done' | 'review';
+  description?: string;
+  bulletPoints?: string[];
+  sources?: Array<string | LearningLessonPlanSource>;
+};
+
+export type LearningLessonPlanSource = {
+  label: string;
+  path?: string;
+  cardId?: string;
+};
+
+/** Display-only lesson plan emitted after a chapter plan is accepted. */
+export type LearningLessonPlanContentBlock = {
+  type: 'learning_lesson_plan';
+  title: string;
+  overview?: string;
+  detail?: string;
+  parts: LearningLessonPlanPart[];
+  nextLessonSummary?: string;
+};
+
+/** Display-only next-step options emitted by the learning orchestrator. */
+export type LearningNextStepsContentBlock = {
+  type: 'learning_next_steps';
+  label?: string;
+  detail?: string;
+  options: string[];
+};
+
+/** Display-only blocks that are persisted outside provider-native transcripts. */
+export type MessageUiBlock =
+  | LearningActionResultContentBlock
+  | LearningActivityContentBlock
+  | LearningLessonPlanContentBlock
+  | LearningNextStepsContentBlock;
+
+export type MessageUiBlockMap = Record<string, MessageUiBlock[]>;
+
 /** Content block for preserving streaming order in messages. */
 export type ContentBlock =
   | { type: 'text'; content: string }
   | { type: 'tool_use'; toolId: string }
   | { type: 'thinking'; content: string; durationSeconds?: number }
   | { type: 'subagent'; subagentId: string; mode?: SubagentMode }
+  | LearningActionResultContentBlock
+  | LearningActivityContentBlock
+  | LearningLessonPlanContentBlock
+  | LearningNextStepsContentBlock
   | { type: 'context_compacted' };
 
 /** Chat message with content, tool calls, and attachments. */
@@ -74,6 +139,8 @@ export interface Conversation {
   /** Opaque provider-owned state bag (session tracking, fork metadata, etc.). */
   providerState?: Record<string, unknown>;
   messages: ChatMessage[];
+  /** UI-only message blocks keyed by ChatMessage.id. These are not sent to providers. */
+  uiMessageBlocks?: MessageUiBlockMap;
   currentNote?: string;
   /** Session-specific external context paths (directories with full access). Resets on new session. */
   externalContextPaths?: string[];
@@ -111,6 +178,8 @@ export interface SessionMetadata {
   providerId?: ProviderId;
   title: string;
   titleGenerationStatus?: 'pending' | 'success' | 'failed';
+  /** UI-only message blocks keyed by ChatMessage.id. These are not sent to providers. */
+  uiMessageBlocks?: MessageUiBlockMap;
   createdAt: number;
   updatedAt: number;
   lastResponseAt?: number;

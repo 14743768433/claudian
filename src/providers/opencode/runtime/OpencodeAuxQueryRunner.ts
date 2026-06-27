@@ -365,11 +365,12 @@ export class OpencodeAuxQueryRunner implements AuxQueryRunner {
     const cwd = this.sessionCwds.get(sessionId)
       ?? getVaultPath(this.plugin.app)
       ?? process.cwd();
-    const resolvedPath = path.isAbsolute(rawPath)
-      ? path.resolve(rawPath)
-      : path.resolve(cwd, rawPath);
-    const relative = path.relative(cwd, resolvedPath);
-    if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
+    const pathApi = pathApiFor(cwd, rawPath);
+    const resolvedPath = pathApi.isAbsolute(rawPath)
+      ? pathApi.normalize(rawPath)
+      : pathApi.resolve(cwd, rawPath);
+    const relative = pathApi.relative(cwd, resolvedPath);
+    if (relative === '' || (!relative.startsWith('..') && !pathApi.isAbsolute(relative))) {
       return resolvedPath;
     }
 
@@ -377,12 +378,18 @@ export class OpencodeAuxQueryRunner implements AuxQueryRunner {
   }
 }
 
+function pathApiFor(...values: string[]): Pick<typeof path, 'isAbsolute' | 'normalize' | 'relative' | 'resolve'> {
+  return values.some(value => /^[A-Za-z]:(?:[\\/]|$)/.test(value) || value.includes('\\'))
+    ? path.win32
+    : path.posix;
+}
+
 function buildOpencodeAuxAgentConfig(profile: OpencodeAuxAgentProfile): OpencodeManagedAgentConfig {
   const id = OPENCODE_AUX_AGENT_IDS[profile];
   if (profile === 'readonly') {
     return {
       definition: {
-        description: 'Internal Claudian read-only agent for OpenCode auxiliary tasks.',
+        description: 'Internal AI Tutor read-only agent for OpenCode auxiliary tasks.',
         mode: 'primary',
         permission: {
           '*': 'deny',
@@ -402,7 +409,7 @@ function buildOpencodeAuxAgentConfig(profile: OpencodeAuxAgentProfile): Opencode
 
   return {
     definition: {
-      description: 'Internal Claudian no-tool agent for OpenCode auxiliary tasks.',
+      description: 'Internal AI Tutor no-tool agent for OpenCode auxiliary tasks.',
       mode: 'primary',
       permission: {
         '*': 'deny',

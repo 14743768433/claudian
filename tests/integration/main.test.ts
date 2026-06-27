@@ -1,6 +1,7 @@
 
 import { TOOL_SUBAGENT } from '@/core/tools/toolNames';
 import { VIEW_TYPE_CLAUDIAN } from '@/core/types';
+import { VIEW_TYPE_COURSE_LIBRARY } from '@/features/learning/views/viewTypes';
 import * as sdkSession from '@/providers/claude/history/ClaudeHistoryStore';
 import { DEFAULT_SETTINGS } from '@/providers/claude/types/settings';
 
@@ -96,8 +97,8 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
 
       expect((plugin.addRibbonIcon as jest.Mock)).toHaveBeenCalledWith(
-        'bot',
-        'Open Claudian',
+        'graduation-cap',
+        'Open AI Tutor',
         expect.any(Function)
       );
     });
@@ -107,7 +108,17 @@ describe('ClaudianPlugin', () => {
 
       expect((plugin.addCommand as jest.Mock)).toHaveBeenCalledWith({
         id: 'open-view',
-        name: 'Open chat view',
+        name: 'Open AI Tutor chat',
+        callback: expect.any(Function),
+      });
+    });
+
+    it('should add command to open the AI Tutor course library', async () => {
+      await plugin.onload();
+
+      expect((plugin.addCommand as jest.Mock)).toHaveBeenCalledWith({
+        id: 'open-course-library',
+        name: 'AI Tutor: 打开课程书架',
         callback: expect.any(Function),
       });
     });
@@ -476,15 +487,21 @@ describe('ClaudianPlugin', () => {
   });
 
   describe('ribbon icon callback', () => {
-    it('reveals existing view when ribbon icon is clicked', async () => {
+    it('opens the course library when ribbon icon is clicked', async () => {
       await plugin.onload();
-      const mockLeaf = { id: 'existing' };
-      mockApp.workspace.getLeavesOfType.mockReturnValue([mockLeaf]);
+      const mockLeaf = {
+        setViewState: jest.fn().mockResolvedValue(undefined),
+      };
+      mockApp.workspace.getLeaf.mockReturnValue(mockLeaf);
 
       const ribbonCallback = (plugin.addRibbonIcon as jest.Mock).mock.calls[0][2];
       await ribbonCallback();
 
-      expect(mockApp.workspace.revealLeaf).toHaveBeenCalledWith(mockLeaf);
+      expect(mockApp.workspace.getLeaf).toHaveBeenCalledWith('tab');
+      expect(mockLeaf.setViewState).toHaveBeenCalledWith({
+        type: VIEW_TYPE_COURSE_LIBRARY,
+        active: true,
+      });
     });
   });
 

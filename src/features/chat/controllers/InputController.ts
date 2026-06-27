@@ -25,7 +25,16 @@ import type {
   ChatTurnRequest,
 } from '../../../core/runtime/types';
 import { TOOL_EXIT_PLAN_MODE } from '../../../core/tools/toolNames';
-import type { ApprovalDecision, ChatMessage, ExitPlanModeDecision, StreamChunk } from '../../../core/types';
+import type {
+  ApprovalDecision,
+  ChatMessage,
+  ExitPlanModeDecision,
+  LearningActivityContentBlock,
+  LearningActionResultContentBlock,
+  LearningNextStepsContentBlock,
+  MessageUiBlock,
+  StreamChunk,
+} from '../../../core/types';
 import type ClaudianPlugin from '../../../main';
 import { ResumeSessionDropdown } from '../../../shared/components/ResumeSessionDropdown';
 import { InstructionModal } from '../../../shared/modals/InstructionConfirmModal';
@@ -194,7 +203,10 @@ export class InputController {
     browserContextOverride?: BrowserSelectionContext | null;
     canvasContextOverride?: CanvasSelectionContext | null;
     content?: string;
+    displayContent?: string;
+    hideUserMessage?: boolean;
     images?: ChatMessage['images'];
+    learningActivity?: LearningActivityContentBlock;
     turnRequestOverride?: ChatTurnRequest;
   }): Promise<void> {
     const {
@@ -218,6 +230,9 @@ export class InputController {
     const contentOverride = options?.content;
     const shouldUseInput = contentOverride === undefined;
     const content = (contentOverride ?? inputEl.value).trim();
+    const hideUserMessage = options?.hideUserMessage === true;
+    const displayContentOverride = hideUserMessage ? '' : options?.displayContent?.trim();
+    const learningActivity = options?.learningActivity;
     const imageOverride = options?.images;
     const hasImages = imageOverride !== undefined
       ? imageOverride.length > 0
@@ -232,6 +247,18 @@ export class InputController {
         this.deps.resetInputHeight();
       }
       await this.executeBuiltInCommand(builtInCmd.command, builtInCmd.args);
+      return;
+    }
+
+    const handledLearningCommand = plugin.learningController
+      ? await plugin.learningController.handleUserCommand(state.currentConversationId, content)
+      : false;
+    if (handledLearningCommand) {
+      if (shouldUseInput) {
+        inputEl.value = '';
+        this.deps.resetInputHeight();
+        imageContextManager?.clearImages();
+      }
       return;
     }
 
@@ -250,9 +277,10 @@ export class InputController {
         browserContextOverride: browserContext,
         canvasContextOverride: canvasContext,
       });
+      const queuedDisplayContent = hideUserMessage ? '' : displayContent;
       state.queuedMessage = this.mergeQueuedMessages(
         state.queuedMessage,
-        this.createQueuedMessage(displayContent, turnRequest),
+        this.createQueuedMessage(queuedDisplayContent, turnRequest),
       );
 
       if (shouldUseInput) {
@@ -298,7 +326,7 @@ export class InputController {
 
     const turnSubmission = options?.turnRequestOverride
       ? {
-        displayContent: content,
+        displayContent: hideUserMessage ? '' : displayContentOverride || content,
         turnRequest: cloneChatTurnRequest(options.turnRequestOverride),
       }
       : this.buildTurnSubmission({
@@ -308,7 +336,8 @@ export class InputController {
         browserContextOverride: options?.browserContextOverride,
         canvasContextOverride: options?.canvasContextOverride,
       });
-    const { displayContent, turnRequest } = turnSubmission;
+    const { displayContent: rawDisplayContent, turnRequest } = turnSubmission;
+    const displayContent = hideUserMessage ? '' : displayContentOverride || rawDisplayContent;
 
     fileContextManager?.markCurrentNoteSent();
 
@@ -324,7 +353,9 @@ export class InputController {
     state.hasPendingConversationSave = true;
     renderer.addMessage(userMsg);
 
-    await this.triggerTitleGeneration();
+    if (!hideUserMessage) {
+      await this.triggerTitleGeneration();
+    }
 
     const assistantMsg: ChatMessage = {
       id: this.deps.generateId(),
@@ -332,11 +363,14 @@ export class InputController {
       content: '',
       timestamp: Date.now(),
       toolCalls: [],
-      contentBlocks: [],
+      contentBlocks: learningActivity ? [learningActivity] : [],
     };
     state.addMessage(assistantMsg);
     this.activeStreamingAssistantMessage = assistantMsg;
     this.activateStreamingAssistantMessage(assistantMsg);
+    if (learningActivity) {
+      renderer.appendLearningActivity(assistantMsg.id, learningActivity);
+    }
     this.pendingProviderUserMessages = [{
       displayContent,
       images: imagesForMessage,
@@ -354,6 +388,7 @@ export class InputController {
     let wasInvalidated = false;
     let didEnqueueToSdk = false;
     let planCompleted = false;
+    let turnErrorMessage: string | null = null;
 
     // Lazy initialization: ensure service is ready before first query
     if (this.deps.ensureServiceInitialized) {
@@ -424,6 +459,7 @@ export class InputController {
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      turnErrorMessage = errorMsg;
       await streamController.appendText(`\n\n**Error:** ${errorMsg}`);
     } finally {
       const finalAssistantMsg = this.activeStreamingAssistantMessage ?? assistantMsg;
@@ -440,12 +476,32 @@ export class InputController {
       if (!wasInvalidated && state.streamGeneration === streamGeneration) {
         const didCancelThisTurn = wasInterrupted || state.cancelRequested;
         if (didCancelThisTurn && !state.pendingNewSessionPlan) {
-          await streamController.appendText('\n\n<span class="claudian-interrupted">Interrupted</span> <span class="claudian-interrupted-hint">· What should Claudian do instead?</span>');
+          await streamController.appendText('\n\n<span class="claudian-interrupted">Interrupted</span> <span class="claudian-interrupted-hint">· What should AI Tutor do instead?</span>');
         }
         streamController.hideThinkingIndicator();
         state.isStreaming = false;
         state.cancelRequested = false;
         this.restorePendingSteerMessageToQueue();
+
+        let finalLearningActivity: LearningActivityContentBlock | null = null;
+        if (learningActivity) {
+          finalLearningActivity = {
+            ...learningActivity,
+            status: turnErrorMessage
+              ? 'error'
+              : didCancelThisTurn
+                ? 'stopped'
+                : 'done',
+            detail: turnErrorMessage
+              ? `${learningActivity.detail ? `${learningActivity.detail} - ` : ''}${turnErrorMessage}`
+              : learningActivity.detail,
+          };
+          finalAssistantMsg.contentBlocks = [
+            finalLearningActivity,
+            ...(finalAssistantMsg.contentBlocks ?? []).filter(block => block.type !== 'learning_activity'),
+          ];
+          renderer.appendLearningActivity(finalAssistantMsg.id, finalLearningActivity);
+        }
 
         // Capture response duration before resetting state (skip for interrupted responses and compaction)
         const hasCompactBoundary = finalAssistantMsg.contentBlocks?.some(b => b.type === 'context_compacted');
@@ -522,6 +578,54 @@ export class InputController {
           // Only clear resumeAtMessageId if enqueue succeeded; preserve checkpoint on failure for retry
           const saveExtras = didEnqueueToSdk ? { resumeAtMessageId: undefined } : undefined;
           await conversationController.save(true, saveExtras);
+          let learningRepairPrompt: string | null = null;
+          const completedConversationId = conversationIdForSend ?? state.currentConversationId;
+          if (completedConversationId && finalLearningActivity) {
+            await this.persistMessageUiBlocks(completedConversationId, finalAssistantMsg.id, [finalLearningActivity]);
+          }
+          if (!didCancelThisTurn && completedConversationId) {
+            const learningCompletion = await plugin.learningController?.handleAssistantTurnComplete(
+              completedConversationId,
+              finalAssistantMsg.content,
+              finalAssistantMsg.id,
+            );
+            learningRepairPrompt = learningCompletion?.repairPrompt ?? null;
+            const actionBlocks: LearningActionResultContentBlock[] = learningCompletion?.actionOutcomes.map((outcome) => ({
+              type: 'learning_action_result',
+              actionType: outcome.actionType,
+              label: outcome.label,
+              status: outcome.status,
+              detail: outcome.detail,
+              message: outcome.message,
+              items: outcome.items,
+            })) ?? [];
+            const lessonPlanBlocks = learningCompletion?.actionOutcomes
+              .map((outcome) => outcome.lessonPlan)
+              .filter((block): block is NonNullable<typeof block> => !!block) ?? [];
+            const nextStepBlocks: LearningNextStepsContentBlock[] = learningCompletion?.nextSteps ?? [];
+
+            if (actionBlocks.length > 0 || lessonPlanBlocks.length > 0 || nextStepBlocks.length > 0) {
+              finalAssistantMsg.contentBlocks = [
+                ...(finalAssistantMsg.contentBlocks ?? []).filter(block => (
+                  block.type !== 'learning_action_result'
+                  && block.type !== 'learning_lesson_plan'
+                  && block.type !== 'learning_next_steps'
+                )),
+                ...actionBlocks,
+                ...lessonPlanBlocks,
+                ...nextStepBlocks,
+              ];
+              if (actionBlocks.length > 0) {
+                renderer.appendLearningActionResults(finalAssistantMsg.id, actionBlocks);
+              }
+              if (lessonPlanBlocks.length > 0) {
+                renderer.appendLearningLessonPlans(finalAssistantMsg.id, lessonPlanBlocks);
+              }
+              if (nextStepBlocks.length > 0) {
+                renderer.appendLearningNextSteps(finalAssistantMsg.id, nextStepBlocks);
+              }
+            }
+          }
 
           const userMsgIndex = state.messages.indexOf(userMsg);
           renderer.refreshActionButtons(userMsg, state.messages, userMsgIndex >= 0 ? userMsgIndex : undefined);
@@ -529,6 +633,9 @@ export class InputController {
           // Auto-implement takes precedence over both approve-new-session and queued input
           if (planAutoSendContent) {
             this.deps.getInputEl().value = planAutoSendContent;
+            this.sendMessage().catch(() => {});
+          } else if (learningRepairPrompt) {
+            this.deps.getInputEl().value = learningRepairPrompt;
             this.sendMessage().catch(() => {});
           } else {
             // approve-new-session: create fresh conversation and send plan content
@@ -741,22 +848,28 @@ export class InputController {
       : options.content;
     const enabledMcpServers = mcpServerSelector?.getEnabledServers();
 
+    const turnRequest: ChatTurnRequest = {
+      text: transformedText,
+      images: options.images,
+      currentNotePath: shouldSendCurrentNote && currentNotePath ? currentNotePath : undefined,
+      editorSelection: editorContext,
+      browserSelection: browserContext,
+      canvasSelection: canvasContext,
+      externalContextPaths: externalContextPaths && externalContextPaths.length > 0
+        ? externalContextPaths
+        : undefined,
+      enabledMcpServers: enabledMcpServers && enabledMcpServers.size > 0
+        ? enabledMcpServers
+        : undefined,
+    };
+
     return {
       displayContent: options.content,
-      turnRequest: {
-        text: transformedText,
-        images: options.images,
-        currentNotePath: shouldSendCurrentNote && currentNotePath ? currentNotePath : undefined,
-        editorSelection: editorContext,
-        browserSelection: browserContext,
-        canvasSelection: canvasContext,
-        externalContextPaths: externalContextPaths && externalContextPaths.length > 0
-          ? externalContextPaths
-          : undefined,
-        enabledMcpServers: enabledMcpServers && enabledMcpServers.size > 0
-          ? enabledMcpServers
-          : undefined,
-      },
+      turnRequest: this.deps.plugin.learningController?.decorateTurnRequestSync(
+        this.deps.state.currentConversationId,
+        turnRequest,
+        this.deps.state.messages.length,
+      ) ?? turnRequest,
     };
   }
 
@@ -1215,6 +1328,31 @@ export class InputController {
       const messagesEl = this.deps.getMessagesEl();
       messagesEl.scrollTop = messagesEl.scrollHeight;
     });
+  }
+
+  private async persistMessageUiBlocks(
+    conversationId: string,
+    assistantMessageId: string,
+    blocks: MessageUiBlock[],
+  ): Promise<void> {
+    if (blocks.length === 0) return;
+
+    const { plugin } = this.deps;
+    const conversation = plugin.getConversationSync(conversationId)
+      ?? await plugin.getConversationById(conversationId);
+    if (!conversation) return;
+
+    const incomingTypes = new Set<string>(blocks.map((block) => block.type));
+    const existingBlocks = conversation.uiMessageBlocks?.[assistantMessageId] ?? [];
+    const uiMessageBlocks = {
+      ...(conversation.uiMessageBlocks ?? {}),
+      [assistantMessageId]: [
+        ...existingBlocks.filter((block) => !incomingTypes.has(block.type)),
+        ...blocks,
+      ],
+    };
+
+    await plugin.updateConversation(conversationId, { uiMessageBlocks });
   }
 
   // ============================================

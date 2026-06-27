@@ -25,7 +25,7 @@ function findFirstExistingPath(entries: string[], candidates: string[]): string 
   for (const dir of entries) {
     if (!dir) continue;
     for (const candidate of candidates) {
-      const fullPath = path.join(dir, candidate);
+      const fullPath = joinPathLike(dir, candidate);
       if (isExistingFile(fullPath)) {
         return fullPath;
       }
@@ -48,7 +48,7 @@ function isExistingFile(filePath: string): boolean {
 
 function findClaudeCodeNodeEntrypoint(packageRoot: string): string | null {
   for (const entrypoint of CLAUDE_CODE_NODE_ENTRYPOINTS) {
-    const candidate = path.join(packageRoot, entrypoint);
+    const candidate = joinPathLike(packageRoot, entrypoint);
     if (isExistingFile(candidate)) {
       return candidate;
     }
@@ -59,18 +59,18 @@ function findClaudeCodeNodeEntrypoint(packageRoot: string): string | null {
 
 function resolveClaudeCodeEntrypointNearPathEntry(entry: string, isWindows: boolean): string | null {
   const directCandidate = findClaudeCodeNodeEntrypoint(
-    path.join(entry, ...CLAUDE_CODE_PACKAGE_SEGMENTS)
+    joinPath(isWindows, entry, ...CLAUDE_CODE_PACKAGE_SEGMENTS)
   );
   if (directCandidate) {
     return directCandidate;
   }
 
-  const baseName = path.basename(entry).toLowerCase();
+  const baseName = basenamePath(isWindows, entry).toLowerCase();
   if (baseName === 'bin') {
-    const prefix = path.dirname(entry);
-    const packageParent = isWindows ? prefix : path.join(prefix, 'lib');
+    const prefix = dirnamePath(isWindows, entry);
+    const packageParent = isWindows ? prefix : joinPath(isWindows, prefix, 'lib');
     const candidate = findClaudeCodeNodeEntrypoint(
-      path.join(packageParent, ...CLAUDE_CODE_PACKAGE_SEGMENTS)
+      joinPath(isWindows, packageParent, ...CLAUDE_CODE_PACKAGE_SEGMENTS)
     );
     if (candidate) {
       return candidate;
@@ -123,7 +123,7 @@ function getNpmGlobalPrefix(): string | null {
 
   if (process.platform === 'win32') {
     const appDataNpm = process.env.APPDATA
-      ? path.join(process.env.APPDATA, 'npm')
+      ? joinPath(true, process.env.APPDATA, 'npm')
       : null;
     if (appDataNpm && fs.existsSync(appDataNpm)) {
       return appDataNpm;
@@ -134,9 +134,9 @@ function getNpmGlobalPrefix(): string | null {
 }
 
 function addClaudeCodeEntrypointPaths(paths: string[], packageParent: string): void {
-  const packageRoot = path.join(packageParent, ...CLAUDE_CODE_PACKAGE_SEGMENTS);
+  const packageRoot = joinPathLike(packageParent, ...CLAUDE_CODE_PACKAGE_SEGMENTS);
   for (const entrypoint of CLAUDE_CODE_NODE_ENTRYPOINTS) {
-    paths.push(path.join(packageRoot, entrypoint));
+    paths.push(joinPathLike(packageRoot, entrypoint));
   }
 }
 
@@ -146,7 +146,8 @@ function getNpmClaudeCodeEntrypointPaths(): string[] {
   const entrypointPaths: string[] = [];
 
   if (isWindows) {
-    addClaudeCodeEntrypointPaths(entrypointPaths, path.join(homeDir, 'AppData', 'Roaming', 'npm'));
+    addClaudeCodeEntrypointPaths(entrypointPaths, joinPath(isWindows, homeDir, 'AppData', 'Roaming', 'npm'));
+    addClaudeCodeEntrypointPaths(entrypointPaths, joinPath(isWindows, homeDir, '.npm-global', 'lib'));
 
     const npmPrefix = getNpmGlobalPrefix();
     if (npmPrefix) {
@@ -156,16 +157,16 @@ function getNpmClaudeCodeEntrypointPaths(): string[] {
     const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
     const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
 
-    addClaudeCodeEntrypointPaths(entrypointPaths, path.join(programFiles, 'nodejs', 'node_global'));
-    addClaudeCodeEntrypointPaths(entrypointPaths, path.join(programFilesX86, 'nodejs', 'node_global'));
-    addClaudeCodeEntrypointPaths(entrypointPaths, path.join('D:', 'Program Files', 'nodejs', 'node_global'));
+    addClaudeCodeEntrypointPaths(entrypointPaths, joinPath(isWindows, programFiles, 'nodejs', 'node_global'));
+    addClaudeCodeEntrypointPaths(entrypointPaths, joinPath(isWindows, programFilesX86, 'nodejs', 'node_global'));
+    addClaudeCodeEntrypointPaths(entrypointPaths, joinPath(isWindows, 'D:', 'Program Files', 'nodejs', 'node_global'));
   } else {
-    addClaudeCodeEntrypointPaths(entrypointPaths, path.join(homeDir, '.npm-global', 'lib'));
+    addClaudeCodeEntrypointPaths(entrypointPaths, joinPath(isWindows, homeDir, '.npm-global', 'lib'));
     addClaudeCodeEntrypointPaths(entrypointPaths, '/usr/local/lib');
     addClaudeCodeEntrypointPaths(entrypointPaths, '/usr/lib');
 
     if (process.env.npm_config_prefix) {
-      addClaudeCodeEntrypointPaths(entrypointPaths, path.join(process.env.npm_config_prefix, 'lib'));
+      addClaudeCodeEntrypointPaths(entrypointPaths, joinPath(isWindows, process.env.npm_config_prefix, 'lib'));
     }
   }
 
@@ -189,11 +190,11 @@ export function findClaudeCLIPath(pathValue?: string): string | null {
   // because it requires shell: true and breaks SDK stdio streaming.
   if (isWindows) {
     const exePaths: string[] = [
-      path.join(homeDir, '.claude', 'local', 'claude.exe'),
-      path.join(homeDir, 'AppData', 'Local', 'Claude', 'claude.exe'),
-      path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Claude', 'claude.exe'),
-      path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Claude', 'claude.exe'),
-      path.join(homeDir, '.local', 'bin', 'claude.exe'),
+      joinPath(isWindows, homeDir, '.claude', 'local', 'claude.exe'),
+      joinPath(isWindows, homeDir, 'AppData', 'Local', 'Claude', 'claude.exe'),
+      joinPath(isWindows, process.env.ProgramFiles || 'C:\\Program Files', 'Claude', 'claude.exe'),
+      joinPath(isWindows, process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Claude', 'claude.exe'),
+      joinPath(isWindows, homeDir, '.local', 'bin', 'claude.exe'),
     ];
 
     for (const p of exePaths) {
@@ -212,26 +213,26 @@ export function findClaudeCLIPath(pathValue?: string): string | null {
   }
 
   const commonPaths: string[] = [
-    path.join(homeDir, '.claude', 'local', 'claude'),
-    path.join(homeDir, '.local', 'bin', 'claude'),
-    path.join(homeDir, '.volta', 'bin', 'claude'),
-    path.join(homeDir, '.asdf', 'shims', 'claude'),
-    path.join(homeDir, '.asdf', 'bin', 'claude'),
+    joinPath(isWindows, homeDir, '.claude', 'local', 'claude'),
+    joinPath(isWindows, homeDir, '.local', 'bin', 'claude'),
+    joinPath(isWindows, homeDir, '.volta', 'bin', 'claude'),
+    joinPath(isWindows, homeDir, '.asdf', 'shims', 'claude'),
+    joinPath(isWindows, homeDir, '.asdf', 'bin', 'claude'),
     '/usr/local/bin/claude',
     '/opt/homebrew/bin/claude',
-    path.join(homeDir, 'bin', 'claude'),
-    path.join(homeDir, '.npm-global', 'bin', 'claude'),
+    joinPath(isWindows, homeDir, 'bin', 'claude'),
+    joinPath(isWindows, homeDir, '.npm-global', 'bin', 'claude'),
   ];
 
   const npmPrefix = getNpmGlobalPrefix();
   if (npmPrefix) {
-    commonPaths.push(path.join(npmPrefix, 'bin', 'claude'));
+    commonPaths.push(joinPath(isWindows, npmPrefix, 'bin', 'claude'));
   }
 
   // NVM: resolve default version bin when NVM_BIN env var is not available (GUI apps)
   const nvmBin = resolveNvmDefaultBin(homeDir);
   if (nvmBin) {
-    commonPaths.push(path.join(nvmBin, 'claude'));
+    commonPaths.push(joinPath(isWindows, nvmBin, 'claude'));
   }
 
   for (const p of commonPaths) {
@@ -258,4 +259,24 @@ export function findClaudeCLIPath(pathValue?: string): string | null {
   }
 
   return null;
+}
+
+function joinPath(isWindows: boolean, first: string, ...parts: string[]): string {
+  return isWindows
+    ? path.win32.join(first, ...parts)
+    : path.posix.join(first, ...parts);
+}
+
+function joinPathLike(first: string, ...parts: string[]): string {
+  return /^[A-Za-z]:(?:[\\/]|$)/.test(first) || first.includes('\\')
+    ? path.win32.join(first, ...parts)
+    : path.posix.join(first, ...parts);
+}
+
+function dirnamePath(isWindows: boolean, value: string): string {
+  return isWindows ? path.win32.dirname(value) : path.posix.dirname(value);
+}
+
+function basenamePath(isWindows: boolean, value: string): string {
+  return isWindows ? path.win32.basename(value) : path.posix.basename(value);
 }

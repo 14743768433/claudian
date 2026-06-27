@@ -1,7 +1,7 @@
 {
-  "name": "claudian",
+  "name": "claudian-ai-tutor",
   "version": "2.0.25",
-  "description": "Claudian - Claude Code embedded in Obsidian sidebar",
+  "description": "AI Tutor - an Obsidian-native learning tutor with an integrated agent runtime",
   "main": "main.js",
   "engines": {
     "node": ">=24 <25"
@@ -14,6 +14,11 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint \"{src,tests}/**/*.ts\"",
     "lint:fix": "npm run lint -- --fix",
+    "eval:content": "node scripts/verify-content.mjs --blind-command \"node scripts/blind-candidate-local.mjs\"",
+    "eval:content:benchmark": "node scripts/verify-content.mjs --no-candidates",
+    "eval:content:blind": "node scripts/verify-content.mjs --blind-command \"node scripts/blind-candidate-local.mjs\"",
+    "eval:content:release": "node scripts/verify-content.mjs --blind-command \"node scripts/blind-candidate-local.mjs\" --record-history --require-stability",
+    "audit:learning-state": "node scripts/audit-learning-state.mjs",
     "test": "node scripts/run-jest.js",
     "test:watch": "node scripts/run-jest.js --watch",
     "test:coverage": "node scripts/run-jest.js --coverage",

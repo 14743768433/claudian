@@ -620,6 +620,33 @@ describe('SessionStorage', () => {
         enabledMcpServers: ['mcp-server'],
         usage,
         titleGenerationStatus: 'success',
+        uiMessageBlocks: {
+          'assistant-1': [{
+            type: 'learning_activity',
+            label: 'Planning chapter',
+            status: 'running',
+            detail: 'Chapter 2: Filters',
+            items: ['Read continuity'],
+          }, {
+            type: 'learning_action_result',
+            actionType: 'planChapter',
+            label: 'Plan chapter',
+            status: 'accepted',
+            message: 'Chapter plan saved.',
+            items: ['Low-pass intuition', 'Cutoff frequency'],
+          }, {
+            type: 'learning_lesson_plan',
+            title: 'Filters',
+            overview: 'Build intuition before formulas.',
+            parts: [{
+              title: 'Low-pass intuition',
+              status: 'current',
+              bulletPoints: ['Cut high-frequency noise'],
+              sources: ['Filter notes'],
+            }],
+            nextLessonSummary: 'Next we will move into sampling.',
+          }],
+        },
       };
 
       const metadata = storage.toSessionMetadata(conversation);
@@ -636,6 +663,28 @@ describe('SessionStorage', () => {
       expect(metadata.enabledMcpServers).toEqual(['mcp-server']);
       expect(metadata.usage).toEqual(usage);
       expect(metadata.titleGenerationStatus).toBe('success');
+      expect(metadata.uiMessageBlocks).toEqual({
+        'assistant-1': [
+          expect.objectContaining({
+            type: 'learning_activity',
+            status: 'running',
+            items: ['Read continuity'],
+          }),
+          expect.objectContaining({
+            type: 'learning_action_result',
+            status: 'accepted',
+            items: ['Low-pass intuition', 'Cutoff frequency'],
+          }),
+          expect.objectContaining({
+            type: 'learning_lesson_plan',
+            title: 'Filters',
+            parts: [expect.objectContaining({
+              title: 'Low-pass intuition',
+              sources: ['Filter notes'],
+            })],
+          }),
+        ],
+      });
 
       // Should not include messages
       expect(metadata).not.toHaveProperty('messages');

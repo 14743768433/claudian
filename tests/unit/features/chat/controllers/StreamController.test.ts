@@ -253,6 +253,49 @@ describe('StreamController - Text Content', () => {
       );
     });
 
+    it('should hide generic ai next-options JSON during live text streaming', async () => {
+      deps.state.currentTextEl = createMockEl();
+
+      await controller.appendText([
+        'Done.',
+        '',
+        '```ai',
+        '{"options":["Continue","Generate note"]}',
+        '```',
+      ].join('\n'));
+
+      jest.advanceTimersByTime(16);
+      await Promise.resolve();
+
+      expect(deps.renderer.renderContent).toHaveBeenCalledTimes(1);
+      expect(deps.renderer.renderContent).toHaveBeenCalledWith(
+        deps.state.currentTextEl,
+        'Done.'
+      );
+    });
+
+    it('should persist raw tutor protocol while attaching copy controls to visible text only', async () => {
+      const msg = createTestMessage();
+      deps.state.currentTextEl = createMockEl();
+      deps.state.currentTextContent = [
+        'Done.',
+        '',
+        '```ai',
+        '{"options":["Continue","Generate note"]}',
+        '```',
+      ].join('\n');
+
+      await controller.finalizeCurrentTextBlock(msg);
+
+      expect(msg.contentBlocks).toEqual([
+        { type: 'text', content: expect.stringContaining('"options"') },
+      ]);
+      expect(deps.renderer.addTextCopyButton).toHaveBeenCalledWith(
+        expect.anything(),
+        'Done.'
+      );
+    });
+
     it('should defer math rendering during live text renders', async () => {
       deps.state.currentTextEl = createMockEl();
 
@@ -1373,22 +1416,20 @@ describe('StreamController - Text Content', () => {
   });
 
   describe('Thinking block finalization', () => {
-    it('should finalize thinking block and add to contentBlocks', async () => {
+    it('should discard thinking block content without adding contentBlocks', async () => {
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
       deps.state.currentThinkingState = {
         content: 'Let me think...',
-        container: createMockEl(),
+        wrapperEl: createMockEl(),
         contentEl: createMockEl(),
         startTime: Date.now(),
       } as any;
 
       await controller.finalizeCurrentThinkingBlock(msg);
 
-      expect(msg.contentBlocks).toContainEqual(
-        expect.objectContaining({ type: 'thinking', content: 'Let me think...' })
-      );
+      expect(msg.contentBlocks).toEqual([]);
       expect(deps.state.currentThinkingState).toBeNull();
     });
 
@@ -1396,7 +1437,7 @@ describe('StreamController - Text Content', () => {
       const msg = createTestMessage();
       deps.state.currentThinkingState = {
         content: '',
-        container: createMockEl(),
+        wrapperEl: createMockEl(),
         contentEl: createMockEl(),
         startTime: Date.now(),
       } as any;
@@ -1415,98 +1456,49 @@ describe('StreamController - Text Content', () => {
       expect(msg.contentBlocks).toEqual([]);
     });
 
-    it('should coalesce thinking renders until the next animation frame', async () => {
+    it('does not create or render visible thinking blocks for thinking chunks', async () => {
       const { createThinkingBlock } = jest.requireMock('@/features/chat/rendering/ThinkingBlockRenderer');
       const msg = createTestMessage();
-      const contentEl = createMockEl();
-      createThinkingBlock.mockReturnValueOnce({
-        wrapperEl: createMockEl(),
-        contentEl,
-        labelEl: createMockEl(),
-        content: '',
-        startTime: Date.now(),
-      });
 
       await controller.handleStreamChunk({ type: 'thinking', content: 'Let ' }, msg);
       await controller.handleStreamChunk({ type: 'thinking', content: 'me think' }, msg);
 
+      expect(createThinkingBlock).not.toHaveBeenCalled();
       expect(deps.renderer.renderContent).not.toHaveBeenCalled();
-
-      jest.advanceTimersByTime(16);
-      await Promise.resolve();
-
-      expect(deps.renderer.renderContent).toHaveBeenCalledTimes(1);
-      expect(deps.renderer.renderContent).toHaveBeenCalledWith(contentEl, 'Let me think');
+      expect(deps.state.currentThinkingState).toBeNull();
+      expect(msg.contentBlocks).toEqual([]);
     });
 
-    it('should defer math rendering during live thinking renders', async () => {
-      const { createThinkingBlock } = jest.requireMock('@/features/chat/rendering/ThinkingBlockRenderer');
+    it('does not render math from hidden thinking chunks', async () => {
       const msg = createTestMessage();
-      const contentEl = createMockEl();
-      createThinkingBlock.mockReturnValueOnce({
-        wrapperEl: createMockEl(),
-        contentEl,
-        labelEl: createMockEl(),
-        content: '',
-        startTime: Date.now(),
-      });
 
       await controller.handleStreamChunk({ type: 'thinking', content: 'Reasoning $x^2$' }, msg);
 
       jest.advanceTimersByTime(16);
       await Promise.resolve();
 
-      expect(deps.renderer.renderContent).toHaveBeenCalledWith(
-        contentEl,
-        'Reasoning $x^2$',
-        { deferMath: true }
-      );
+      expect(deps.renderer.renderContent).not.toHaveBeenCalled();
+      expect(msg.contentBlocks).toEqual([]);
     });
 
-    it('should render original math once when finalizing a deferred thinking block', async () => {
-      const { createThinkingBlock } = jest.requireMock('@/features/chat/rendering/ThinkingBlockRenderer');
+    it('does not persist hidden thinking when finalizing after a thinking chunk', async () => {
       const msg = createTestMessage();
-      const contentEl = createMockEl();
-      createThinkingBlock.mockReturnValueOnce({
-        wrapperEl: createMockEl(),
-        contentEl,
-        labelEl: createMockEl(),
-        content: '',
-        startTime: Date.now(),
-      });
 
       await controller.handleStreamChunk({ type: 'thinking', content: 'Reasoning $x^2$' }, msg);
       await controller.finalizeCurrentThinkingBlock(msg);
 
-      expect(deps.renderer.renderContent).toHaveBeenNthCalledWith(
-        1,
-        contentEl,
-        'Reasoning $x^2$',
-        { deferMath: true }
-      );
-      expect(deps.renderer.renderContent).toHaveBeenNthCalledWith(
-        2,
-        contentEl,
-        'Reasoning $x^2$'
-      );
-      expect(msg.contentBlocks).toContainEqual(
-        expect.objectContaining({ type: 'thinking', content: 'Reasoning $x^2$' })
-      );
+      expect(deps.renderer.renderContent).not.toHaveBeenCalled();
+      expect(msg.contentBlocks).toEqual([]);
     });
 
-    it('should flush a pending thinking render before finalizing', async () => {
+    it('finalizing after hidden thinking remains a no-op for visible content', async () => {
       const msg = createTestMessage();
 
       await controller.handleStreamChunk({ type: 'thinking', content: 'Reasoning' }, msg);
       await controller.finalizeCurrentThinkingBlock(msg);
 
-      expect(deps.renderer.renderContent).toHaveBeenCalledWith(
-        expect.anything(),
-        'Reasoning'
-      );
-      expect(msg.contentBlocks).toContainEqual(
-        expect.objectContaining({ type: 'thinking', content: 'Reasoning' })
-      );
+      expect(deps.renderer.renderContent).not.toHaveBeenCalled();
+      expect(msg.contentBlocks).toEqual([]);
     });
   });
 
@@ -1705,17 +1697,17 @@ describe('StreamController - Text Content', () => {
 
       deps.state.currentThinkingState = {
         content: 'Let me think...',
-        container: createMockEl(),
+        wrapperEl: createMockEl(),
         contentEl: createMockEl(),
         startTime: Date.now(),
       } as any;
 
       await controller.handleStreamChunk({ type: 'text', content: 'Hello' }, msg);
 
-      expect(finalizeThinkingBlock).toHaveBeenCalled();
+      expect(finalizeThinkingBlock).not.toHaveBeenCalled();
       expect(deps.state.currentThinkingState).toBeNull();
-      expect(msg.contentBlocks).toContainEqual(
-        expect.objectContaining({ type: 'thinking', content: 'Let me think...' })
+      expect(msg.contentBlocks).not.toContainEqual(
+        expect.objectContaining({ type: 'thinking' })
       );
     });
 
@@ -1745,7 +1737,7 @@ describe('StreamController - Text Content', () => {
 
       deps.state.currentThinkingState = {
         content: 'Reasoning...',
-        container: createMockEl(),
+        wrapperEl: createMockEl(),
         contentEl: createMockEl(),
         startTime: Date.now(),
       } as any;
@@ -1755,10 +1747,10 @@ describe('StreamController - Text Content', () => {
         msg
       );
 
-      expect(finalizeThinkingBlock).toHaveBeenCalled();
+      expect(finalizeThinkingBlock).not.toHaveBeenCalled();
       expect(deps.state.currentThinkingState).toBeNull();
-      expect(msg.contentBlocks).toContainEqual(
-        expect.objectContaining({ type: 'thinking', content: 'Reasoning...' })
+      expect(msg.contentBlocks).not.toContainEqual(
+        expect.objectContaining({ type: 'thinking' })
       );
     });
   });

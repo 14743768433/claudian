@@ -11,7 +11,17 @@ import {
   TOOL_WRITE_STDIN,
 } from '../../../core/tools/toolNames';
 import { extractToolResultContent } from '../../../core/tools/toolResultContent';
-import type { ChatMessage, ImageAttachment, SubagentInfo, ToolCallInfo } from '../../../core/types';
+import type {
+  ChatMessage,
+  ImageAttachment,
+  LearningActivityContentBlock,
+  LearningActionResultContentBlock,
+  LearningLessonPlanContentBlock,
+  LearningLessonPlanSource,
+  LearningNextStepsContentBlock,
+  SubagentInfo,
+  ToolCallInfo,
+} from '../../../core/types';
 import { t } from '../../../i18n/i18n';
 import type ClaudianPlugin from '../../../main';
 import { extractUserDisplayContent } from '../../../utils/context';
@@ -26,7 +36,6 @@ import {
   renderStoredAsyncSubagent,
   renderStoredSubagent,
 } from './SubagentRenderer';
-import { renderStoredThinkingBlock } from './ThinkingBlockRenderer';
 import { renderStoredToolCall } from './ToolCallRenderer';
 import { renderStoredWriteEdit } from './WriteEditRenderer';
 
@@ -40,10 +49,369 @@ export type RenderContentFn = (
   options?: RenderContentOptions
 ) => Promise<void>;
 
+export type NextOptionCallback = (option: string) => Promise<void> | void;
+
+export interface TutorActionSummary {
+  type: string;
+  label: string;
+  detail?: string;
+}
+
+type TutorActionCard = TutorActionSummary & {
+  status?: 'requested' | 'accepted' | 'rejected';
+  message?: string;
+  items?: string[];
+};
+
+const TUTOR_ACTION_TYPES = new Set([
+  'generateSyllabus',
+  'planChapter',
+  'sectionNoteWritten',
+  'advanceSection',
+  'startNewLesson',
+]);
+
 function runRendererAction(action: () => Promise<void>): void {
   void action().catch(() => {
     // UI actions already surface expected failures locally.
   });
+}
+
+function stripOptionMarkdown(value: string): string {
+  return value
+    .replace(/\*\*/g, '')
+    .replace(/`/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[。.!！?？]+$/g, '')
+    .trim();
+}
+
+function splitInlineOptions(value: string): string[] {
+  const cleaned = stripOptionMarkdown(value);
+  if (!cleaned) return [];
+
+  const parts = cleaned.includes('/') || cleaned.includes('|') || cleaned.includes('｜') || cleaned.includes('、') || cleaned.includes(';') || cleaned.includes('；')
+    ? cleaned.split(/\s*(?:\/|\||｜|、|;|；)\s*/g)
+    : [cleaned];
+
+  return parts
+    .map(stripOptionMarkdown)
+    .filter((part) => part.length >= 2 && part.length <= 80);
+}
+
+function collectUniqueOptions(options: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const option of options) {
+    const cleaned = stripOptionMarkdown(option);
+    if (!cleaned || seen.has(cleaned)) continue;
+    seen.add(cleaned);
+    result.push(cleaned);
+    if (result.length >= 4) break;
+  }
+  return result;
+}
+
+function parseStructuredNextOptions(raw: string): string[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    const values = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === 'object' && Array.isArray((parsed as { options?: unknown }).options)
+        ? (parsed as { options: unknown[] }).options
+        : [];
+    return collectUniqueOptions(values.filter((value): value is string => typeof value === 'string'));
+  } catch {
+    return collectUniqueOptions(
+      trimmed
+        .split(/\r?\n/)
+        .flatMap((line) => splitInlineOptions(line.replace(/^(?:[-*+•]\s+|\d+[.)]\s+)/, ''))),
+    );
+  }
+}
+
+function structuredNextOptionsFromJson(raw: string): string[] | null {
+  try {
+    const parsed = JSON.parse(raw.trim()) as unknown;
+    const values = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === 'object' && Array.isArray((parsed as { options?: unknown }).options)
+        ? (parsed as { options: unknown[] }).options
+        : [];
+    const options = collectUniqueOptions(values.filter((value): value is string => typeof value === 'string'));
+    return options.length > 0 ? options : null;
+  } catch {
+    return null;
+  }
+}
+
+function lessonPlanSourceLabel(source: string | LearningLessonPlanSource): string {
+  return typeof source === 'string' ? source.trim() : source.label.trim();
+}
+
+function lessonPlanSourcePath(source: string | LearningLessonPlanSource): string | null {
+  if (typeof source !== 'string' && source.path?.trim()) {
+    return source.path.trim();
+  }
+  const label = lessonPlanSourceLabel(source);
+  if (!label) return null;
+  const wiki = label.match(/\[\[([^|\]#]+)(?:#[^|\]]+)?(?:\|[^\]]+)?\]\]/);
+  if (wiki?.[1]?.trim()) return wiki[1].trim();
+  const markdown = label.match(/\]\(([^)]+?\.md)(?:#[^)]+)?\)/i);
+  if (markdown?.[1]?.trim()) return markdown[1].trim();
+  return /\.md(?:$|[\s"')\]])/i.test(label) ? label : null;
+}
+
+export function stripNextOptionsBlocks(markdown: string): string {
+  return markdown
+    .replace(/```([^\n`]*)\r?\n([\s\S]*?)```/g, (match, language: string, body: string) => (
+      shouldTreatFenceAsNextOptions(language, body) ? '' : match
+    ))
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+export function stripTutorActionBlocks(markdown: string): string {
+  return markdown
+    .replace(/```([^\n`]*)\r?\n([\s\S]*?)```/g, (match, language: string, body: string) => (
+      shouldTreatFenceAsTutorAction(language, body) ? '' : match
+    ))
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+export function stripTutorProtocolBlocks(markdown: string): string {
+  return stripTutorActionBlocks(stripNextOptionsBlocks(markdown));
+}
+
+function shouldTreatDanglingFenceAsTutorAction(language: string, body: string): boolean {
+  const normalized = language.trim().toLowerCase().split(/\s+/)[0] ?? '';
+  if (normalized === 'ai-tutor-action') return true;
+  if (normalized !== 'ai' && normalized !== 'json' && normalized !== '') return false;
+
+  const trimmed = body.trimStart();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false;
+  return /"type"\s*:\s*"(generateSyllabus|planChapter|sectionNoteWritten|advanceSection|startNewLesson)/.test(trimmed);
+}
+
+function shouldTreatDanglingFenceAsTutorProtocol(language: string, body: string): boolean {
+  return shouldTreatDanglingFenceAsTutorAction(language, body)
+    || shouldTreatDanglingFenceAsNextOptions(language, body);
+}
+
+function stripDanglingTutorActionFence(markdown: string): string {
+  const fencePattern = /```([^\n`]*)\r?\n/g;
+  let cursor = 0;
+
+  while (true) {
+    fencePattern.lastIndex = cursor;
+    const opening = fencePattern.exec(markdown);
+    if (!opening) return markdown;
+
+    const bodyStart = fencePattern.lastIndex;
+    const closingIndex = markdown.indexOf('```', bodyStart);
+    if (closingIndex === -1) {
+      const language = opening[1] ?? '';
+      const body = markdown.slice(bodyStart);
+      return shouldTreatDanglingFenceAsTutorProtocol(language, body)
+        ? markdown.slice(0, opening.index)
+        : markdown;
+    }
+
+    cursor = closingIndex + 3;
+  }
+}
+
+export function stripTutorProtocolBlocksForStreaming(markdown: string): string {
+  return stripDanglingTutorActionFence(stripTutorProtocolBlocks(markdown))
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function normalizeTutorActionValue(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const action = value as Record<string, unknown>;
+  if (typeof action.type !== 'string' || !TUTOR_ACTION_TYPES.has(action.type)) return null;
+
+  if (action.data && typeof action.data === 'object' && !Array.isArray(action.data)) {
+    return {
+      ...(action.data as Record<string, unknown>),
+      type: action.type,
+    };
+  }
+
+  return action;
+}
+
+function summarizeTutorAction(value: unknown): TutorActionSummary | null {
+  const action = normalizeTutorActionValue(value) as {
+    type?: unknown;
+    title?: unknown;
+    chapterTitle?: unknown;
+    notePath?: unknown;
+    noteTitle?: unknown;
+    sections?: unknown;
+    topics?: unknown;
+  } | null;
+  if (!action) return null;
+  if (typeof action.type !== 'string' || !action.type.trim()) return null;
+
+  switch (action.type) {
+    case 'generateSyllabus': {
+      const count = Array.isArray(action.topics) ? action.topics.length : 0;
+      return {
+        type: action.type,
+        label: 'Save course map',
+        detail: count > 0 ? `${count} topics` : undefined,
+      };
+    }
+    case 'planChapter': {
+      const count = Array.isArray(action.sections) ? action.sections.length : 0;
+      const title = typeof action.title === 'string' && action.title.trim()
+        ? action.title.trim()
+        : typeof action.chapterTitle === 'string' && action.chapterTitle.trim()
+          ? action.chapterTitle.trim()
+          : 'current chapter';
+      return {
+        type: action.type,
+        label: 'Plan chapter',
+        detail: count > 0 ? `${title} · ${count} sections` : title,
+      };
+    }
+    case 'sectionNoteWritten': {
+      const note = typeof action.noteTitle === 'string' && action.noteTitle.trim()
+        ? action.noteTitle.trim()
+        : typeof action.notePath === 'string' && action.notePath.trim()
+          ? action.notePath.trim()
+          : undefined;
+      return { type: action.type, label: 'Register section note', detail: note };
+    }
+    case 'advanceSection':
+      return { type: action.type, label: 'Advance section' };
+    case 'startNewLesson':
+      return { type: action.type, label: 'Start new lesson' };
+    default:
+      return { type: action.type, label: 'Learning action' };
+  }
+}
+
+function tutorActionsFromJson(raw: string): TutorActionSummary[] | null {
+  try {
+    const parsed = JSON.parse(raw.trim()) as unknown;
+    const values = Array.isArray(parsed) ? parsed : [parsed];
+    const actions = values
+      .map(summarizeTutorAction)
+      .filter((action): action is TutorActionSummary => action !== null);
+    return actions.length > 0 ? actions : null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldTreatFenceAsTutorAction(language: string, body: string): boolean {
+  const normalized = language.trim().toLowerCase().split(/\s+/)[0] ?? '';
+  const isCandidateLanguage = normalized === 'ai-tutor-action'
+    || normalized === 'ai'
+    || normalized === 'json'
+    || normalized === '';
+  if (!isCandidateLanguage) return false;
+  if (normalized === 'ai-tutor-action') return true;
+  return tutorActionsFromJson(body) !== null;
+}
+
+function shouldTreatFenceAsNextOptions(language: string, body: string): boolean {
+  const normalized = language.trim().toLowerCase().split(/\s+/)[0] ?? '';
+  if (normalized === 'ai-tutor-next-options') return true;
+  if (normalized !== 'ai' && normalized !== 'json' && normalized !== '') return false;
+  return structuredNextOptionsFromJson(body) !== null;
+}
+
+function shouldTreatDanglingFenceAsNextOptions(language: string, body: string): boolean {
+  const normalized = language.trim().toLowerCase().split(/\s+/)[0] ?? '';
+  if (normalized === 'ai-tutor-next-options') return true;
+  if (normalized !== 'ai' && normalized !== 'json' && normalized !== '') return false;
+
+  const trimmed = body.trimStart();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false;
+  return /"options"\s*:/.test(trimmed);
+}
+
+export function extractTutorActions(markdown: string): TutorActionSummary[] {
+  const actions: TutorActionSummary[] = [];
+  markdown.replace(/```([^\n`]*)\r?\n([\s\S]*?)```/g, (_match, language: string, body: string) => {
+    const trimmed = body.trim();
+    if (!trimmed) return '';
+    const parsedActions = tutorActionsFromJson(trimmed);
+    if (parsedActions) {
+      actions.push(...parsedActions);
+    } else if (language.trim().toLowerCase().startsWith('ai-tutor-action')) {
+      actions.push({ type: 'invalid', label: 'Learning action', detail: 'Could not preview request' });
+    }
+    return '';
+  });
+  return actions.slice(0, 4);
+}
+
+export function extractNextOptions(markdown: string): string[] {
+  const structuredOptions: string[] = [];
+  markdown.replace(/```([^\n`]*)\r?\n([\s\S]*?)```/g, (_match, language: string, body: string) => {
+    if (shouldTreatFenceAsNextOptions(language, body)) {
+      structuredOptions.push(...parseStructuredNextOptions(body));
+    }
+    return '';
+  });
+  if (structuredOptions.length > 0) {
+    return collectUniqueOptions(structuredOptions);
+  }
+
+  const lines = markdown.split(/\r?\n/);
+  const options: string[] = [];
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index].trim();
+    const heading = line.match(/^(?:#{1,6}\s*)?(?:\*\*)?\s*(Next options|下一步(?:选项)?|接下来(?:可以|建议)?)(?:\*\*)?\s*[:：]?\s*(.*)$/i);
+    if (!heading) continue;
+
+    for (const inlineOption of splitInlineOptions(heading[2] ?? '')) {
+      options.push(inlineOption);
+      if (options.length >= 4) return options;
+    }
+
+    for (let optionIndex = index + 1; optionIndex < lines.length && options.length < 4; optionIndex++) {
+      const optionLine = lines[optionIndex].trim();
+      if (!optionLine) {
+        if (options.length > 0) break;
+        continue;
+      }
+      if (/^(#{1,6}\s+|```|~~~)/.test(optionLine) || /ai-tutor-action/i.test(optionLine)) {
+        break;
+      }
+
+      const bullet = optionLine.match(/^(?:[-*+•]\s+|\d+[.)]\s+)(.+)$/);
+      if (bullet) {
+        for (const option of splitInlineOptions(bullet[1])) {
+          options.push(option);
+          if (options.length >= 4) return options;
+        }
+        continue;
+      }
+
+      if (options.length === 0) {
+        for (const option of splitInlineOptions(optionLine)) {
+          options.push(option);
+          if (options.length >= 4) return options;
+        }
+      }
+      break;
+    }
+
+    break;
+  }
+
+  return collectUniqueOptions(options);
 }
 
 export class MessageRenderer {
@@ -54,6 +422,7 @@ export class MessageRenderer {
   private rewindCallback?: (messageId: string, mode?: ChatRewindMode) => Promise<void>;
   private getCapabilities: () => ProviderCapabilities;
   private forkCallback?: (messageId: string) => Promise<void>;
+  private nextOptionCallback?: NextOptionCallback;
   private liveMessageEls = new Map<string, HTMLElement>();
 
   constructor(
@@ -63,6 +432,7 @@ export class MessageRenderer {
     rewindCallback?: (messageId: string, mode?: ChatRewindMode) => Promise<void>,
     forkCallback?: (messageId: string) => Promise<void>,
     getCapabilities?: () => ProviderCapabilities,
+    nextOptionCallback?: NextOptionCallback,
   ) {
     this.app = plugin.app;
     this.plugin = plugin;
@@ -70,6 +440,7 @@ export class MessageRenderer {
     this.messagesEl = messagesEl;
     this.rewindCallback = rewindCallback;
     this.forkCallback = forkCallback;
+    this.nextOptionCallback = nextOptionCallback;
     this.getCapabilities = getCapabilities ?? (() => ({
       providerId: DEFAULT_CHAT_PROVIDER_ID,
       supportsPersistentRuntime: false,
@@ -146,6 +517,7 @@ export class MessageRenderer {
         'data-role': msg.role,
       },
     });
+    this.liveMessageEls.set(msg.id, msgEl);
 
     const contentEl = msgEl.createDiv({ cls: 'claudian-message-content', attr: { dir: 'auto' } });
 
@@ -309,13 +681,16 @@ export class MessageRenderer {
   }
 
   private hasVisibleContent(msg: ChatMessage): boolean {
-    if (msg.content && msg.content.trim().length > 0) return true;
+    if (msg.content && this.hasVisibleMarkdownContent(msg.content)) return true;
     if (msg.contentBlocks && msg.contentBlocks.length > 0) {
       for (const block of msg.contentBlocks) {
-        if (block.type === 'thinking' && block.content.trim().length > 0) return true;
-        if (block.type === 'text' && block.content.trim().length > 0) return true;
+        if (block.type === 'text' && this.hasVisibleMarkdownContent(block.content)) return true;
         if (block.type === 'context_compacted') return true;
         if (block.type === 'subagent') return true;
+        if (block.type === 'learning_activity') return true;
+        if (block.type === 'learning_action_result') return true;
+        if (block.type === 'learning_lesson_plan') return true;
+        if (block.type === 'learning_next_steps') return true;
         if (block.type === 'tool_use') {
           const toolCall = msg.toolCalls?.find(tc => tc.id === block.toolId);
           if (toolCall && this.shouldRenderToolCall(toolCall)) return true;
@@ -324,6 +699,12 @@ export class MessageRenderer {
     }
     if (msg.toolCalls?.some(toolCall => this.shouldRenderToolCall(toolCall))) return true;
     return false;
+  }
+
+  private hasVisibleMarkdownContent(markdown: string): boolean {
+    return stripTutorProtocolBlocks(markdown).trim().length > 0
+      || extractTutorActions(markdown).length > 0
+      || extractNextOptions(markdown).length > 0;
   }
 
   private isRewindEligible(allMessages?: ChatMessage[], index?: number): boolean {
@@ -350,7 +731,7 @@ export class MessageRenderer {
     textEl.appendText(' ');
     textEl.createSpan({
       cls: 'claudian-interrupted-hint',
-      text: '\u00B7 What should Claudian do instead?',
+      text: '\u00B7 What should AI Tutor do instead?',
     });
   }
 
@@ -362,20 +743,16 @@ export class MessageRenderer {
       const renderedToolIds = new Set<string>();
       for (const block of msg.contentBlocks) {
         if (block.type === 'thinking') {
-          renderStoredThinkingBlock(
-            contentEl,
-            block.content,
-            block.durationSeconds,
-            (el, md) => this.renderContent(el, md)
-          );
+          continue;
         } else if (block.type === 'text') {
           // Skip empty or whitespace-only text blocks to avoid extra gaps
-          if (!block.content || !block.content.trim()) {
+          const visibleContent = stripTutorProtocolBlocks(block.content);
+          if (!visibleContent) {
             continue;
           }
           const textEl = contentEl.createDiv({ cls: 'claudian-text-block' });
-          void this.renderContent(textEl, block.content);
-          this.addTextCopyButton(textEl, block.content);
+          void this.renderContent(textEl, visibleContent);
+          this.addTextCopyButton(textEl, visibleContent);
         } else if (block.type === 'tool_use') {
           const toolCall = msg.toolCalls?.find(tc => tc.id === block.toolId);
           if (toolCall) {
@@ -385,6 +762,21 @@ export class MessageRenderer {
         } else if (block.type === 'context_compacted') {
           const boundaryEl = contentEl.createDiv({ cls: 'claudian-compact-boundary' });
           boundaryEl.createSpan({ cls: 'claudian-compact-boundary-label', text: 'Conversation compacted' });
+        } else if (block.type === 'learning_activity') {
+          this.renderLearningActivityCard(contentEl, block);
+        } else if (block.type === 'learning_action_result') {
+          this.renderTutorActionCard(contentEl, {
+            type: block.actionType,
+            label: block.label,
+            detail: block.detail,
+            status: block.status,
+            message: block.message,
+            items: block.items,
+          });
+        } else if (block.type === 'learning_lesson_plan') {
+          this.renderLessonPlanCard(contentEl, block);
+        } else if (block.type === 'learning_next_steps') {
+          this.renderLearningNextSteps(contentEl, block);
         } else if (block.type === 'subagent') {
           const taskToolCall = msg.toolCalls?.find(
             tc => tc.id === block.subagentId && isSubagentToolName(tc.name)
@@ -407,9 +799,12 @@ export class MessageRenderer {
     } else {
       // Fallback for old conversations without contentBlocks
       if (msg.content) {
-        const textEl = contentEl.createDiv({ cls: 'claudian-text-block' });
-        void this.renderContent(textEl, msg.content);
-        this.addTextCopyButton(textEl, msg.content);
+        const visibleContent = stripTutorProtocolBlocks(msg.content);
+        if (visibleContent) {
+          const textEl = contentEl.createDiv({ cls: 'claudian-text-block' });
+          void this.renderContent(textEl, visibleContent);
+          this.addTextCopyButton(textEl, visibleContent);
+        }
       }
       if (msg.toolCalls) {
         for (const toolCall of msg.toolCalls) {
@@ -428,6 +823,291 @@ export class MessageRenderer {
         cls: 'claudian-baked-duration',
       });
     }
+
+    this.renderTutorActionCards(contentEl, msg);
+    this.renderNextOptionChips(contentEl, msg);
+  }
+
+  private getAssistantOptionSource(msg: ChatMessage): string {
+    const textBlocks = msg.contentBlocks
+      ?.filter((block): block is Extract<NonNullable<ChatMessage['contentBlocks']>[number], { type: 'text' }> => block.type === 'text')
+      .map((block) => block.content.trim())
+      .filter(Boolean) ?? [];
+    return textBlocks.length > 0 ? textBlocks.join('\n') : msg.content;
+  }
+
+  private renderNextOptionChips(contentEl: HTMLElement, msg: ChatMessage): void {
+    if (!this.nextOptionCallback) return;
+    const options = extractNextOptions(this.getAssistantOptionSource(msg));
+    if (options.length === 0) return;
+
+    this.renderNextOptionChipRow(contentEl, options, 'Next');
+  }
+
+  private renderNextOptionChipRow(parent: HTMLElement, options: string[], label: string, detail?: string): HTMLElement | null {
+    const cleanedOptions = collectUniqueOptions(options);
+    if (cleanedOptions.length === 0) return null;
+
+    const chipsEl = parent.createDiv({ cls: 'claudian-next-options' });
+    chipsEl.createSpan({ cls: 'claudian-next-options-label', text: label });
+    if (detail) {
+      chipsEl.createSpan({ cls: 'claudian-next-options-detail', text: detail });
+    }
+    for (const option of cleanedOptions) {
+      const chip = chipsEl.createEl('button', {
+        cls: 'claudian-next-option-chip',
+        text: option,
+        attr: {
+          type: 'button',
+          'aria-label': `Send: ${option}`,
+        },
+      });
+      if (!this.nextOptionCallback) {
+        chip.setAttribute('disabled', 'true');
+      }
+      chip.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (!this.nextOptionCallback) return;
+        chip.setAttribute('disabled', 'true');
+        runRendererAction(async () => {
+          await this.nextOptionCallback?.(option);
+        });
+      });
+    }
+    return chipsEl;
+  }
+
+  private renderLearningNextSteps(parent: HTMLElement, block: LearningNextStepsContentBlock): HTMLElement | null {
+    const stepsEl = this.renderNextOptionChipRow(parent, block.options, block.label ?? 'Next', block.detail);
+    stepsEl?.addClass('is-learning-next-steps');
+    return stepsEl;
+  }
+
+  private renderTutorActionCards(contentEl: HTMLElement, msg: ChatMessage): void {
+    if (msg.contentBlocks?.some(block => block.type === 'learning_action_result')) {
+      return;
+    }
+
+    const actions = extractTutorActions(this.getAssistantOptionSource(msg));
+    if (actions.length === 0) return;
+
+    const actionsEl = contentEl.createDiv({ cls: 'claudian-tutor-actions' });
+    for (const action of actions) {
+      this.renderTutorActionCard(actionsEl, { ...action, status: 'requested' });
+    }
+  }
+
+  appendLearningActionResults(messageId: string, outcomes: LearningActionResultContentBlock[]): void {
+    if (outcomes.length === 0) return;
+
+    const msgEl = this.liveMessageEls.get(messageId)
+      ?? this.messagesEl.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
+    const contentEl = msgEl?.querySelector<HTMLElement>('.claudian-message-content');
+    if (!contentEl) return;
+
+    contentEl.querySelectorAll('.claudian-tutor-actions').forEach((el) => el.remove());
+
+    const actionsEl = contentEl.createDiv({ cls: 'claudian-tutor-actions is-result' });
+    const footerEl = contentEl.querySelector<HTMLElement>('.claudian-response-footer');
+    if (footerEl) {
+      contentEl.insertBefore(actionsEl, footerEl);
+    }
+    for (const outcome of outcomes) {
+      this.renderTutorActionCard(actionsEl, {
+        type: outcome.actionType,
+        label: outcome.label,
+        detail: outcome.detail,
+        status: outcome.status,
+        message: outcome.message,
+        items: outcome.items,
+      });
+    }
+    this.scrollToBottom();
+  }
+
+  appendLearningLessonPlans(messageId: string, plans: LearningLessonPlanContentBlock[]): void {
+    if (plans.length === 0) return;
+
+    const msgEl = this.liveMessageEls.get(messageId)
+      ?? this.messagesEl.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
+    const contentEl = msgEl?.querySelector<HTMLElement>('.claudian-message-content');
+    if (!contentEl) return;
+
+    contentEl.querySelectorAll('.claudian-lesson-plan-card').forEach((el) => el.remove());
+    const footerEl = contentEl.querySelector<HTMLElement>('.claudian-response-footer');
+    for (const plan of plans) {
+      const planEl = this.renderLessonPlanCard(contentEl, plan);
+      if (footerEl) {
+        contentEl.insertBefore(planEl, footerEl);
+      }
+    }
+    this.scrollToBottom();
+  }
+
+  appendLearningNextSteps(messageId: string, blocks: LearningNextStepsContentBlock[]): void {
+    if (blocks.length === 0) return;
+
+    const msgEl = this.liveMessageEls.get(messageId)
+      ?? this.messagesEl.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
+    const contentEl = msgEl?.querySelector<HTMLElement>('.claudian-message-content');
+    if (!contentEl) return;
+
+    contentEl.querySelectorAll('.claudian-next-options.is-learning-next-steps').forEach((el) => el.remove());
+    const footerEl = contentEl.querySelector<HTMLElement>('.claudian-response-footer');
+    for (const block of blocks) {
+      const stepsEl = this.renderLearningNextSteps(contentEl, block);
+      if (stepsEl) {
+        if (footerEl) {
+          contentEl.insertBefore(stepsEl, footerEl);
+        }
+      }
+    }
+    this.scrollToBottom();
+  }
+
+  appendLearningActivity(messageId: string, activity: LearningActivityContentBlock): void {
+    const msgEl = this.liveMessageEls.get(messageId)
+      ?? this.messagesEl.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`);
+    const contentEl = msgEl?.querySelector<HTMLElement>('.claudian-message-content');
+    if (!contentEl) return;
+
+    contentEl.querySelectorAll('.claudian-learning-activity-card').forEach((el) => el.remove());
+    const textEl = contentEl.querySelector<HTMLElement>('.claudian-text-block');
+    const cardEl = this.renderLearningActivityCard(contentEl, activity);
+    if (textEl) {
+      contentEl.insertBefore(cardEl, textEl);
+    }
+    this.scrollToBottom();
+  }
+
+  private renderLearningActivityCard(parent: HTMLElement, activity: LearningActivityContentBlock): HTMLElement {
+    const cardEl = parent.createDiv({ cls: `claudian-learning-activity-card is-${activity.status}` });
+    cardEl.createSpan({ cls: 'claudian-learning-activity-kicker', text: this.getLearningActivityKicker(activity.status) });
+    cardEl.createSpan({ cls: 'claudian-learning-activity-label', text: activity.label });
+    if (activity.detail) {
+      cardEl.createSpan({ cls: 'claudian-learning-activity-detail', text: activity.detail });
+    }
+
+    const items = activity.items?.map((item) => item.trim()).filter(Boolean).slice(0, 8) ?? [];
+    if (items.length > 0) {
+      const listEl = cardEl.createEl('ul', { cls: 'claudian-learning-activity-items' });
+      for (const item of items) {
+        listEl.createEl('li', { text: item });
+      }
+    }
+    return cardEl;
+  }
+
+  private getLearningActivityKicker(status: LearningActivityContentBlock['status']): string {
+    if (status === 'done') return 'AI Tutor - Done';
+    if (status === 'error') return 'AI Tutor - Error';
+    if (status === 'stopped') return 'AI Tutor - Stopped';
+    return 'AI Tutor - Working';
+  }
+
+  private renderLessonPlanCard(parent: HTMLElement, plan: LearningLessonPlanContentBlock): HTMLElement {
+    const cardEl = parent.createDiv({ cls: 'claudian-lesson-plan-card' });
+    const headerEl = cardEl.createDiv({ cls: 'claudian-lesson-plan-header' });
+    headerEl.createSpan({ cls: 'claudian-lesson-plan-kicker', text: 'AI Tutor - Lesson plan' });
+    headerEl.createSpan({ cls: 'claudian-lesson-plan-title', text: plan.title });
+    if (plan.detail) {
+      headerEl.createSpan({ cls: 'claudian-lesson-plan-detail', text: plan.detail });
+    }
+    if (plan.overview) {
+      cardEl.createDiv({ cls: 'claudian-lesson-plan-overview', text: plan.overview });
+    }
+
+    const parts = plan.parts.slice(0, 8);
+    if (parts.length > 0) {
+      const listEl = cardEl.createEl('ol', { cls: 'claudian-lesson-plan-parts' });
+      for (const part of parts) {
+        const itemEl = listEl.createEl('li', { cls: `claudian-lesson-plan-part is-${part.status ?? 'pending'}` });
+        const partHeaderEl = itemEl.createDiv({ cls: 'claudian-lesson-plan-part-header' });
+        partHeaderEl.createSpan({ cls: 'claudian-lesson-plan-part-title', text: part.title });
+        partHeaderEl.createSpan({ cls: 'claudian-lesson-plan-part-status', text: this.getLessonPlanPartStatus(part.status) });
+        if (part.description) {
+          itemEl.createDiv({ cls: 'claudian-lesson-plan-part-description', text: part.description });
+        }
+        const bulletPoints = part.bulletPoints?.map((point) => point.trim()).filter(Boolean).slice(0, 5) ?? [];
+        if (bulletPoints.length > 0) {
+          const bulletsEl = itemEl.createEl('ul', { cls: 'claudian-lesson-plan-bullets' });
+          for (const point of bulletPoints) {
+            bulletsEl.createEl('li', { text: point });
+          }
+        }
+        const sources = part.sources?.filter((source) => !!lessonPlanSourceLabel(source)).slice(0, 4) ?? [];
+        if (sources.length > 0) {
+          const sourcesEl = itemEl.createDiv({ cls: 'claudian-lesson-plan-sources' });
+          sourcesEl.createSpan({ cls: 'claudian-lesson-plan-sources-label', text: 'Sources' });
+          for (const source of sources) {
+            this.renderLessonPlanSourceChip(sourcesEl, source);
+          }
+        }
+      }
+    }
+
+    if (plan.nextLessonSummary) {
+      const nextEl = cardEl.createDiv({ cls: 'claudian-lesson-plan-next' });
+      nextEl.createSpan({ cls: 'claudian-lesson-plan-next-label', text: 'Next lesson' });
+      nextEl.createSpan({ cls: 'claudian-lesson-plan-next-text', text: plan.nextLessonSummary });
+    }
+    return cardEl;
+  }
+
+  private renderLessonPlanSourceChip(parent: HTMLElement, source: string | LearningLessonPlanSource): void {
+    const label = lessonPlanSourceLabel(source);
+    const path = lessonPlanSourcePath(source);
+    if (!path) {
+      parent.createSpan({ cls: 'claudian-lesson-plan-source', text: label });
+      return;
+    }
+
+    const button = parent.createEl('button', {
+      cls: 'claudian-lesson-plan-source is-clickable',
+      text: label,
+      attr: {
+        type: 'button',
+        title: `Open source: ${path}`,
+      },
+    });
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      void this.plugin.learningController.openSource(source);
+    });
+  }
+
+  private getLessonPlanPartStatus(status: LearningLessonPlanContentBlock['parts'][number]['status']): string {
+    if (status === 'current') return 'Now';
+    if (status === 'done') return 'Done';
+    if (status === 'review') return 'Review';
+    return 'Pending';
+  }
+
+  private renderTutorActionCard(parent: HTMLElement, action: TutorActionCard): HTMLElement {
+    const status = action.status ?? 'requested';
+    const cardEl = parent.createDiv({ cls: `claudian-tutor-action-card is-${status}` });
+    const statusText = status === 'accepted'
+      ? 'Accepted'
+      : status === 'rejected'
+        ? 'Rejected'
+        : 'Requested';
+
+    cardEl.createSpan({ cls: 'claudian-tutor-action-kicker', text: `AI Tutor - ${statusText}` });
+    cardEl.createSpan({ cls: 'claudian-tutor-action-label', text: action.label });
+    if (action.detail) {
+      cardEl.createSpan({ cls: 'claudian-tutor-action-detail', text: action.detail });
+    }
+    if (action.message) {
+      cardEl.createSpan({ cls: 'claudian-tutor-action-message', text: action.message });
+    }
+    const items = action.items?.map((item) => item.trim()).filter(Boolean).slice(0, 8) ?? [];
+    if (items.length > 0) {
+      const listEl = cardEl.createEl('ul', { cls: 'claudian-tutor-action-items' });
+      for (const item of items) {
+        listEl.createEl('li', { text: item });
+      }
+    }
+    return cardEl;
   }
 
   /**

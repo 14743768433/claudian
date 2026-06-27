@@ -265,7 +265,7 @@ describe('normalizePathForFilesystem', () => {
     process.env.TEST_NORM_VAR = '/test/val';
     try {
       const result = normalizePathForFilesystem('$TEST_NORM_VAR/sub');
-      expect(result).toBe(path.normalize('/test/val/sub'));
+      expect(result).toBe('/test/val/sub');
     } finally {
       if (original === undefined) delete process.env.TEST_NORM_VAR;
       else process.env.TEST_NORM_VAR = original;

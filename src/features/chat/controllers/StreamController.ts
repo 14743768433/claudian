@@ -35,17 +35,17 @@ import { extractDiffData } from '../../../utils/diff';
 import { hasStreamingMathDelimiters } from '../../../utils/markdownMath';
 import { getVaultPath, normalizePathForVault } from '../../../utils/path';
 import { FLAVOR_TEXTS } from '../constants';
-import type { MessageRenderer, RenderContentOptions } from '../rendering/MessageRenderer';
+import {
+  stripTutorProtocolBlocksForStreaming,
+  type MessageRenderer,
+  type RenderContentOptions,
+} from '../rendering/MessageRenderer';
 import { resolveSubagentLifecycleAdapter } from '../rendering/subagentLifecycleResolution';
 import {
   createSubagentBlock,
   finalizeSubagentBlock,
   type SubagentState,
 } from '../rendering/SubagentRenderer';
-import {
-  createThinkingBlock,
-  finalizeThinkingBlock,
-} from '../rendering/ThinkingBlockRenderer';
 import {
   getToolName,
   getToolSummary,
@@ -685,18 +685,22 @@ export class StreamController {
     await this.flushPendingTextRender();
 
     if (msg && state.currentTextContent) {
+      const visibleContent = stripTutorProtocolBlocksForStreaming(state.currentTextContent);
       if (
         state.currentTextEl
+        && visibleContent
         && this.shouldDeferMathRendering()
-        && hasStreamingMathDelimiters(state.currentTextContent)
+        && hasStreamingMathDelimiters(visibleContent)
       ) {
-        await renderer.renderContent(state.currentTextEl, state.currentTextContent);
+        await renderer.renderContent(state.currentTextEl, visibleContent);
       }
       msg.contentBlocks = msg.contentBlocks || [];
       msg.contentBlocks.push({ type: 'text', content: state.currentTextContent });
       // Copy button added here (not during streaming) to match history-loaded messages
-      if (state.currentTextEl) {
-        renderer.addTextCopyButton(state.currentTextEl, state.currentTextContent);
+      if (state.currentTextEl && visibleContent) {
+        renderer.addTextCopyButton(state.currentTextEl, visibleContent);
+      } else if (state.currentTextEl && !visibleContent) {
+        state.currentTextEl.remove();
       }
     }
     state.currentTextEl = null;
@@ -740,14 +744,15 @@ export class StreamController {
     const { state, renderer } = this.deps;
     const textEl = state.currentTextEl;
     const content = state.currentTextContent;
+    const visibleContent = stripTutorProtocolBlocksForStreaming(content);
 
     try {
       if (textEl) {
-        const options = this.getStreamingRenderOptions(content);
+        const options = this.getStreamingRenderOptions(visibleContent);
         if (options) {
-          await renderer.renderContent(textEl, content, options);
+          await renderer.renderContent(textEl, visibleContent, options);
         } else {
-          await renderer.renderContent(textEl, content);
+          await renderer.renderContent(textEl, visibleContent);
         }
         this.scrollToBottom();
       }
@@ -814,41 +819,27 @@ export class StreamController {
   // ============================================
 
   async appendThinking(content: string): Promise<void> {
-    const { state, renderer } = this.deps;
-    if (!state.currentContentEl) return;
-
-    this.hideThinkingIndicator();
-    if (!state.currentThinkingState) {
-      state.currentThinkingState = createThinkingBlock(
-        state.currentContentEl,
-        (el, md) => renderer.renderContent(el, md)
-      );
-    }
-
-    state.currentThinkingState.content += content;
-    void this.scheduleCurrentThinkingRender();
+    // Provider reasoning is internal orchestration. Keep the lightweight working
+    // indicator, but do not render or persist the model's thinking transcript.
+    void content;
   }
 
   async finalizeCurrentThinkingBlock(msg?: ChatMessage): Promise<void> {
-    const { state, renderer } = this.deps;
+    const { state } = this.deps;
     if (!state.currentThinkingState) return;
-    await this.flushPendingThinkingRender();
 
     const thinkingState = state.currentThinkingState;
-    if (this.getStreamingRenderOptions(thinkingState.content)) {
-      await renderer.renderContent(thinkingState.contentEl, thinkingState.content);
+    if (this.pendingThinkingRenderFrame !== null) {
+      cancelScheduledAnimationFrame(this.pendingThinkingRenderFrame);
+      this.pendingThinkingRenderFrame = null;
     }
+    this.resolvePendingThinkingRender?.();
+    this.pendingThinkingRenderPromise = null;
+    this.resolvePendingThinkingRender = null;
+    this.isThinkingRenderRunning = false;
 
-    const durationSeconds = finalizeThinkingBlock(thinkingState);
-
-    if (msg && thinkingState.content) {
-      msg.contentBlocks = msg.contentBlocks || [];
-      msg.contentBlocks.push({
-        type: 'thinking',
-        content: thinkingState.content,
-        durationSeconds,
-      });
-    }
+    thinkingState.wrapperEl?.remove();
+    void msg;
 
     state.currentThinkingState = null;
   }
