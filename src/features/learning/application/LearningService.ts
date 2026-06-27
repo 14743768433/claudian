@@ -25,17 +25,10 @@ import type { LayoutPort } from '../ports/LayoutPort';
 import type { NoticePort } from '../ports/NoticePort';
 import type { VaultPort } from '../ports/VaultPort';
 import { LearningReadModel, type LearningConversationStatus } from './LearningReadModel';
+import { SourceLoader, sourcePathFromText, type LessonNoteSnippet, type SourceSnippet } from './SourceLoader';
 
 function actionNeedsQualityGate(action: LearningAction): action is Extract<LearningAction, { type: 'sectionNoteWritten' }> {
   return action.type === 'sectionNoteWritten';
-}
-
-function isLessonPlanBlock(block: unknown): block is LearningLessonPlanContentBlock {
-  if (!block || typeof block !== 'object') return false;
-  const candidate = block as Partial<LearningLessonPlanContentBlock>;
-  return candidate.type === 'learning_lesson_plan'
-    && typeof candidate.title === 'string'
-    && Array.isArray(candidate.parts);
 }
 
 function isStartNewLessonCommand(text: string): boolean {
@@ -112,6 +105,7 @@ export interface LearningServiceDependencies {
   transitionService: StateTransitionService;
   progression: LessonProgression;
   skillSeeder: SkillSeeder;
+  sourceLoader: SourceLoader;
 }
 
 function emptyLearningTurnCompletion(): LearningTurnCompletion {
@@ -250,22 +244,6 @@ function formatPlanSource(source: unknown): string | LearningLessonPlanSource | 
     : path ?? cardId ?? null;
   if (!label) return null;
   return { label, path, cardId };
-}
-
-function sourcePathFromText(value: string): string | null {
-  const wiki = value.match(/\[\[([^|\]#]+)(?:#[^|\]]+)?(?:\|[^\]]+)?\]\]/);
-  if (wiki?.[1]?.trim()) {
-    return wiki[1].trim();
-  }
-  const markdown = value.match(/\]\(([^)]+?\.md)(?:#[^)]+)?\)/i);
-  if (markdown?.[1]?.trim()) {
-    return markdown[1].trim();
-  }
-  const direct = value.match(/(^|[\s"'(])([^"'()\r\n]+\.md)(?=$|[\s"')])/i);
-  if (direct?.[2]?.trim()) {
-    return direct[2].trim();
-  }
-  return null;
 }
 
 function buildLessonPlanBlock(
@@ -490,18 +468,6 @@ function buildSectionNotePrompt(course: CourseState, lesson: LessonSession, note
   ].join('\n');
 }
 
-interface SourceSnippet {
-  label: string;
-  path: string;
-  text: string;
-}
-
-interface LessonNoteSnippet {
-  label: string;
-  path: string;
-  text: string;
-}
-
 function buildSourceContext(sourceSnippets: SourceSnippet[]): string {
   if (sourceSnippets.length === 0) return '';
   return [
@@ -649,6 +615,7 @@ export class LearningService {
   private readonly transformationRegistry = new TransformationRegistry();
   private readonly progression: LessonProgression;
   private readonly skillSeeder: SkillSeeder;
+  private readonly sourceLoader: SourceLoader;
   private readonly conversationCache = new Map<string, LoadedLessonRef>();
   private readonly conversationTurnModes = new Map<string, LearningTurnMode>();
   private readonly readModel = new LearningReadModel(this.conversationCache, this.conversationTurnModes);
@@ -667,6 +634,7 @@ export class LearningService {
     this.transitionService = deps.transitionService;
     this.progression = deps.progression;
     this.skillSeeder = deps.skillSeeder;
+    this.sourceLoader = deps.sourceLoader;
   }
 
   async initialize(): Promise<void> {
@@ -877,7 +845,7 @@ export class LearningService {
     }
 
     const notePath = buildSectionNotePath(ref.course, ref.lesson);
-    const sourceSnippets = await this.loadCurrentSectionSourceSnippets(ref.lesson);
+    const sourceSnippets = await this.sourceLoader.loadCurrentSectionSourceSnippets(ref.lesson);
     await tab.sendHiddenTurn({
       content: buildSectionNotePromptWithSources(ref.course, ref.lesson, notePath, sourceSnippets),
       displayContent: `生成本节笔记：${section.title}`,
@@ -917,7 +885,7 @@ export class LearningService {
       return;
     }
 
-    const sourceSnippets = await this.loadCurrentSectionSourceSnippets(ref.lesson);
+    const sourceSnippets = await this.sourceLoader.loadCurrentSectionSourceSnippets(ref.lesson);
     await tab.sendHiddenTurn({
       content: buildSectionPracticePrompt(
         ref.course,
@@ -1234,7 +1202,7 @@ export class LearningService {
     const requestedPath = typeof source === 'string'
       ? sourcePathFromText(label) ?? label
       : source.path?.trim() || sourcePathFromText(source.label) || '';
-    const resolvedPath = await this.resolveSourceVaultPath(requestedPath);
+    const resolvedPath = await this.sourceLoader.resolveSourceVaultPath(requestedPath);
     if (resolvedPath) {
       await this.layout.revealNotePane(resolvedPath);
       return;
@@ -1310,128 +1278,6 @@ export class LearningService {
 
   private repairKey(conversationId: string, notePath: string): string {
     return `${conversationId}::${notePath}`;
-  }
-
-  private async loadCurrentSectionSourceSnippets(lesson: LessonSession): Promise<SourceSnippet[]> {
-    const plan = await this.loadLatestLessonPlan(lesson);
-    const sources = plan?.parts[lesson.currentSectionIndex]?.sources ?? [];
-    if (sources.length === 0) return [];
-
-    const snippets: SourceSnippet[] = [];
-    const seenPaths = new Set<string>();
-    for (const source of sources) {
-      const path = this.resolveSourcePath(source);
-      if (!path || seenPaths.has(path)) continue;
-      seenPaths.add(path);
-      const resolvedPath = await this.resolveSourceVaultPath(path);
-      if (!resolvedPath) continue;
-
-      const text = await this.readSourceFileSnippet(resolvedPath);
-      if (!text) continue;
-      snippets.push({
-        label: typeof source === 'string' ? source.trim() : source.label.trim(),
-        path: resolvedPath,
-        text,
-      });
-      if (snippets.length >= 3) break;
-    }
-    return snippets;
-  }
-
-  private async loadLatestLessonPlan(lesson: LessonSession): Promise<LearningLessonPlanContentBlock | null> {
-    const conversation = await this.turns.getConversation(lesson.conversationId);
-    if (!conversation || typeof conversation !== 'object') return null;
-
-    const blocks: LearningLessonPlanContentBlock[] = [];
-    const candidate = conversation as {
-      uiMessageBlocks?: Record<string, MessageUiBlock[]>;
-      messages?: Array<{ contentBlocks?: unknown[] }>;
-    };
-    for (const uiBlocks of Object.values(candidate.uiMessageBlocks ?? {})) {
-      for (const block of uiBlocks) {
-        if (isLessonPlanBlock(block)) blocks.push(block);
-      }
-    }
-    for (const message of candidate.messages ?? []) {
-      for (const block of message.contentBlocks ?? []) {
-        if (isLessonPlanBlock(block)) blocks.push(block);
-      }
-    }
-    return blocks.at(-1) ?? null;
-  }
-
-  private async loadLessonNoteSnippets(lesson: LessonSession): Promise<LessonNoteSnippet[]> {
-    const snippets: LessonNoteSnippet[] = [];
-    const seenPaths = new Set<string>();
-    for (const section of lesson.sections) {
-      const path = section.notePath?.trim();
-      if (!path || seenPaths.has(path)) continue;
-      seenPaths.add(path);
-      try {
-        if (!(await this.adapter.exists(path))) continue;
-        const markdown = await this.adapter.read(path);
-        const text = this.compactSourceSnippet(markdown);
-        if (!text) continue;
-        snippets.push({
-          label: section.noteTitle?.trim() || section.title,
-          path,
-          text,
-        });
-        if (snippets.length >= 6) break;
-      } catch {
-        continue;
-      }
-    }
-    return snippets;
-  }
-
-  private resolveSourcePath(source: string | LearningLessonPlanSource): string | null {
-    if (typeof source !== 'string' && source.path?.trim()) {
-      return source.path.trim();
-    }
-    const label = typeof source === 'string' ? source.trim() : source.label.trim();
-    return sourcePathFromText(label);
-  }
-
-  private async readSourceFileSnippet(path: string): Promise<string> {
-    try {
-      return await this.adapter.boundedRead(path, 2400) ?? '';
-    } catch {
-      return '';
-    }
-  }
-
-  private compactSourceSnippet(markdown: string): string {
-    return markdown
-      .replace(/\r\n/g, '\n')
-      .replace(/\n{4,}/g, '\n\n\n')
-      .trim()
-      .slice(0, 2400);
-  }
-
-  private async resolveSourceVaultPath(path: string): Promise<string | null> {
-    const trimmed = path.trim();
-    if (!trimmed) return null;
-
-    const candidates = [trimmed];
-    if (!/\.[^/.\\]+$/.test(trimmed)) {
-      candidates.push(`${trimmed}.md`);
-    }
-
-    for (const candidate of candidates) {
-      if (await this.adapter.exists(candidate)) {
-        return candidate;
-      }
-    }
-
-    for (const candidate of candidates) {
-      const resolved = this.adapter.resolveLinkpath(candidate.replace(/\.md$/i, ''), '');
-      if (resolved && await this.adapter.exists(resolved)) {
-        return resolved;
-      }
-    }
-
-    return null;
   }
 
   private async ensureLessonConversation(course: CourseState, lesson: LessonSession): Promise<CourseState> {
@@ -1589,7 +1435,7 @@ export class LearningService {
       return false;
     }
 
-    const noteSnippets = await this.loadLessonNoteSnippets(lesson);
+    const noteSnippets = await this.sourceLoader.loadLessonNoteSnippets(lesson);
     await tab.sendHiddenTurn({
       content: buildLessonReviewPrompt(
         course,

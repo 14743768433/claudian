@@ -6,6 +6,7 @@ import { ObsidianNoticeAdapter } from './adapters/ObsidianNoticeAdapter';
 import { ObsidianVaultAdapter } from './adapters/ObsidianVaultAdapter';
 import { IndexRepository } from './application/IndexRepository';
 import { LearningService } from './application/LearningService';
+import { SourceLoader } from './application/SourceLoader';
 import { StateTransitionService } from './application/StateTransitionService';
 import { SkillSeeder } from './content/SkillSeeder';
 import { LearningStateMachine } from './flow/LearningStateMachine';
@@ -24,6 +25,7 @@ export class LearningController extends LearningService {
     const indexRepository = new IndexRepository(stateService);
     const stateMachine = new LearningStateMachine(stateService, indexRepository);
     const transitionService = new StateTransitionService(stateService, indexRepository);
+    const sourceLoader = new SourceLoader(adapter, turns);
     const progression = new LessonProgression(
       turns,
       stateMachine,
@@ -41,6 +43,7 @@ export class LearningController extends LearningService {
       transitionService,
       progression,
       skillSeeder: new SkillSeeder(adapter),
+      sourceLoader,
     });
   }
 }
