@@ -324,6 +324,53 @@ describe('LearningStateMachine', () => {
     expect(JSON.stringify(course)).toBe(before);
   });
 
+  it('applies system actions for note files and conversation replacement', async () => {
+    const { service } = createStateService();
+    const course = await service.createCourse({
+      title: 'Signals',
+      goalTitle: 'Understand filters',
+      intakeConversationId: 'conv-intake',
+      now: 100,
+    });
+    const machine = new DomainLearningStateMachine();
+    const planned = machine.reduce(course, {
+      type: 'planChapter',
+      title: 'Filters',
+      sections: [{ id: 's1', title: 'Low-pass intuition' }],
+      conversationId: 'conv-1',
+    }).nextState!;
+    const noted = machine.reduce(planned, {
+      type: 'sectionNoteWritten',
+      sectionId: 's1',
+      notePath: 'AI Tutor/Courses/signals/old.md',
+    }).nextState!;
+
+    const replaced = machine.reduce(noted, {
+      type: 'conversationReplaced',
+      lessonId: 'lesson-1',
+      conversationId: 'conv-replacement',
+    }).nextState!;
+    expect(replaced.lessons.find((lesson) => lesson.lessonId === 'lesson-1')?.conversationId).toBe('conv-replacement');
+
+    const renamed = machine.reduce(replaced, {
+      type: 'noteRenamed',
+      oldPath: 'AI Tutor/Courses/signals/old.md',
+      newPath: 'AI Tutor/Courses/signals/new-name.md',
+    }).nextState!;
+    const renamedSection = renamed.lessons.find((lesson) => lesson.lessonId === 'lesson-1')?.sections[0];
+    expect(renamedSection).toEqual(expect.objectContaining({
+      notePath: 'AI Tutor/Courses/signals/new-name.md',
+      noteTitle: 'new-name',
+      missing: false,
+    }));
+
+    const deleted = machine.reduce(renamed, {
+      type: 'noteDeleted',
+      path: 'AI Tutor/Courses/signals/new-name.md',
+    }).nextState!;
+    expect(deleted.lessons.find((lesson) => lesson.lessonId === 'lesson-1')?.sections[0].missing).toBe(true);
+  });
+
   it('rejects advancing before the current section note is written', async () => {
     const { service } = createStateService();
     const course = await service.createCourse({

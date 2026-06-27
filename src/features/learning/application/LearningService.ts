@@ -152,6 +152,8 @@ function describeLearningAction(action: LearningAction): Omit<LearningActionOutc
         detail: action.title?.trim() || undefined,
         items: action.sections?.map((section) => section.title.trim()).filter(Boolean).slice(0, 8),
       };
+    default:
+      return { actionType: action.type, label: 'Apply system update' };
   }
 }
 
@@ -204,6 +206,8 @@ function acceptedMessageForLearningAction(action: LearningAction): string {
       return 'Next section started.';
     case 'startNewLesson':
       return 'New lesson conversation opened.';
+    default:
+      return 'System update saved.';
   }
 }
 
@@ -731,12 +735,19 @@ export class LearningService {
       this.notice.notify('AI Tutor lesson could not be found.');
       return;
     }
-    await this.ensureLessonConversation(course, lesson);
-    course.currentLessonId = lesson.lessonId;
-    await this.stateService.saveCourse(course);
-    this.cacheCourse(course);
-    await this.openChatConversation(lesson.conversationId);
-    await this.refreshOpenLearningViews(course.courseId);
+    const ensuredCourse = await this.ensureLessonConversation(course, lesson);
+    const result = await this.stateMachine.applyAction(ensuredCourse.courseId, {
+      type: 'lessonSelected',
+      lessonId,
+    });
+    if (!result.ok || !result.state) {
+      this.notice.notify(result.message ?? 'AI Tutor lesson could not be selected.');
+      return;
+    }
+    const selectedLesson = result.state.lessons.find((candidate) => candidate.lessonId === lessonId) ?? lesson;
+    this.cacheCourse(result.state);
+    await this.openChatConversation(selectedLesson.conversationId);
+    await this.refreshOpenLearningViews(result.state.courseId);
   }
 
   canStartNewLesson(conversationId: string | null): boolean {
@@ -1032,10 +1043,11 @@ export class LearningService {
     const lesson = this.stateService.currentLesson(course);
     if (!lesson) return;
 
-    await this.ensureLessonConversation(course, lesson);
+    const ensuredCourse = await this.ensureLessonConversation(course, lesson);
+    const ensuredLesson = this.stateService.currentLesson(ensuredCourse) ?? lesson;
 
     await this.layout.ensureSideLeaves(courseId);
-    await this.openChatConversation(lesson.conversationId);
+    await this.openChatConversation(ensuredLesson.conversationId);
   }
 
   decorateTurnRequestSync(
@@ -1273,18 +1285,29 @@ export class LearningService {
   }
 
   async handleVaultRename(oldPath: string, newPath: string): Promise<void> {
-    const changed = await this.stateService.handleVaultRename(oldPath, newPath);
-    for (const course of changed) {
-      this.cacheCourse(course);
-      await this.refreshOpenLearningViews(course.courseId);
+    for (const course of await this.stateService.listCourses()) {
+      const result = await this.stateMachine.applyAction(course.courseId, {
+        type: 'noteRenamed',
+        oldPath,
+        newPath,
+      });
+      if (result.ok && result.state) {
+        this.cacheCourse(result.state);
+        await this.refreshOpenLearningViews(result.state.courseId);
+      }
     }
   }
 
   async handleVaultDelete(path: string): Promise<void> {
-    const changed = await this.stateService.handleVaultDelete(path);
-    for (const course of changed) {
-      this.cacheCourse(course);
-      await this.refreshOpenLearningViews(course.courseId);
+    for (const course of await this.stateService.listCourses()) {
+      const result = await this.stateMachine.applyAction(course.courseId, {
+        type: 'noteDeleted',
+        path,
+      });
+      if (result.ok && result.state) {
+        this.cacheCourse(result.state);
+        await this.refreshOpenLearningViews(result.state.courseId);
+      }
     }
   }
 
@@ -1446,15 +1469,23 @@ export class LearningService {
     return null;
   }
 
-  private async ensureLessonConversation(course: CourseState, lesson: LessonSession): Promise<void> {
+  private async ensureLessonConversation(course: CourseState, lesson: LessonSession): Promise<CourseState> {
     if (this.turns.hasConversation(lesson.conversationId)) {
-      return;
+      return course;
     }
     const replacement = await this.turns.createConversation();
     await this.turns.renameConversation(replacement.id, `${course.title} · ${lesson.title}`);
-    lesson.conversationId = replacement.id;
-    await this.stateService.saveCourse(course);
-    this.notice.notify('AI Tutor recreated a missing chapter conversation.');
+    const result = await this.stateMachine.applyAction(course.courseId, {
+      type: 'conversationReplaced',
+      lessonId: lesson.lessonId,
+      conversationId: replacement.id,
+    });
+    if (result.ok && result.state) {
+      this.notice.notify('AI Tutor recreated a missing chapter conversation.');
+      return result.state;
+    }
+    this.notice.notify(result.message ?? 'AI Tutor could not recreate the missing chapter conversation.');
+    return course;
   }
 
   private async openChatConversation(conversationId: string): Promise<void> {

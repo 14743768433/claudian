@@ -139,6 +139,29 @@ export type LearningAction =
       coveredSummary?: string;
       sections?: LearningPlanSectionInput[];
       force?: boolean;
+    }
+  | {
+      type: 'noteRenamed';
+      oldPath: string;
+      newPath: string;
+    }
+  | {
+      type: 'noteDeleted';
+      path: string;
+    }
+  | {
+      type: 'conversationReplaced';
+      lessonId: string;
+      conversationId: string;
+    }
+  | {
+      type: 'coveredSummaryWritten';
+      lessonId: string;
+      coveredSummary: string;
+    }
+  | {
+      type: 'lessonSelected';
+      lessonId: string;
     };
 
 export interface LearningActionResult {

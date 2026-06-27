@@ -45,6 +45,20 @@ function toSections(raw: Array<{ id?: string; title: string }>): Section[] {
     .filter((section) => section.title.length > 0);
 }
 
+function normalizeLearningPath(value: string): string {
+  return value
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/+/g, '/')
+    .replace(/\/$/, '');
+}
+
+function basenameFromPath(value: string): string {
+  const normalized = normalizeLearningPath(value);
+  return normalized.split('/').pop()?.replace(/\.md$/i, '') || normalized;
+}
+
 export class LearningStateMachine {
   reduce(state: CourseState, action: LearningAction): LearningStateTransition {
     const nextState = cloneCourseState(state);
@@ -79,6 +93,16 @@ export class LearningStateMachine {
         return this.advanceSection(state, action);
       case 'startNewLesson':
         return this.startNewLesson(state, action);
+      case 'noteRenamed':
+        return this.noteRenamed(state, action);
+      case 'noteDeleted':
+        return this.noteDeleted(state, action);
+      case 'conversationReplaced':
+        return this.conversationReplaced(state, action);
+      case 'coveredSummaryWritten':
+        return this.coveredSummaryWritten(state, action);
+      case 'lessonSelected':
+        return this.lessonSelected(state, action);
       default:
         return { ok: false, message: 'Unknown AI Tutor action.' };
     }
@@ -270,5 +294,82 @@ export class LearningStateMachine {
       return lesson.sections.find((section) => section.id === sectionId) ?? null;
     }
     return lesson.sections[lesson.currentSectionIndex] ?? null;
+  }
+
+  private noteRenamed(
+    state: CourseState,
+    action: Extract<LearningAction, { type: 'noteRenamed' }>,
+  ): LearningActionResult {
+    const oldPath = normalizeLearningPath(action.oldPath);
+    const newPath = normalizeLearningPath(action.newPath);
+    let changed = false;
+    for (const lesson of state.lessons) {
+      for (const section of lesson.sections) {
+        if (section.notePath === oldPath) {
+          section.notePath = newPath;
+          section.noteTitle = basenameFromPath(newPath);
+          section.missing = false;
+          lesson.updatedAt = Date.now();
+          changed = true;
+        }
+      }
+    }
+    return changed ? { ok: true, state } : { ok: false, message: 'No matching lesson note was renamed.' };
+  }
+
+  private noteDeleted(
+    state: CourseState,
+    action: Extract<LearningAction, { type: 'noteDeleted' }>,
+  ): LearningActionResult {
+    const path = normalizeLearningPath(action.path);
+    let changed = false;
+    for (const lesson of state.lessons) {
+      for (const section of lesson.sections) {
+        if (section.notePath === path) {
+          section.missing = true;
+          lesson.updatedAt = Date.now();
+          changed = true;
+        }
+      }
+    }
+    return changed ? { ok: true, state } : { ok: false, message: 'No matching lesson note was deleted.' };
+  }
+
+  private conversationReplaced(
+    state: CourseState,
+    action: Extract<LearningAction, { type: 'conversationReplaced' }>,
+  ): LearningActionResult {
+    const lesson = state.lessons.find((candidate) => candidate.lessonId === action.lessonId);
+    if (!lesson) {
+      return { ok: false, message: 'Lesson not found for conversation replacement.' };
+    }
+    lesson.conversationId = action.conversationId;
+    lesson.updatedAt = Date.now();
+    return { ok: true, state };
+  }
+
+  private coveredSummaryWritten(
+    state: CourseState,
+    action: Extract<LearningAction, { type: 'coveredSummaryWritten' }>,
+  ): LearningActionResult {
+    const lesson = state.lessons.find((candidate) => candidate.lessonId === action.lessonId);
+    if (!lesson) {
+      return { ok: false, message: 'Lesson not found for summary update.' };
+    }
+    lesson.coveredSummary = action.coveredSummary;
+    lesson.updatedAt = Date.now();
+    return { ok: true, state };
+  }
+
+  private lessonSelected(
+    state: CourseState,
+    action: Extract<LearningAction, { type: 'lessonSelected' }>,
+  ): LearningActionResult {
+    const lesson = state.lessons.find((candidate) => candidate.lessonId === action.lessonId);
+    if (!lesson) {
+      return { ok: false, message: 'Lesson could not be found.' };
+    }
+    state.currentLessonId = lesson.lessonId;
+    return { ok: true, state };
   }
 }
