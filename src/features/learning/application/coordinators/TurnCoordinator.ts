@@ -7,13 +7,13 @@ import type {
   MessageUiBlock,
 } from '../../../../core/types';
 import type { ChatTurnRequest } from '../../../../core/runtime/types';
-import { ContentQualityGate } from '../../content/ContentQualityGate';
+import { ContentQualityGate } from '../../domain/ContentQualityGate';
 import { ActionRequestChannel } from '../ActionRequestChannel';
-import { LearningContextInjector } from '../../context/LearningContextInjector';
+import { LearningContextInjector } from '../context/LearningContextInjector';
 import type { LearningTurnPort } from '../../ports/LearningTurnPort';
 import type { NoticePort } from '../../ports/NoticePort';
 import type { VaultPort } from '../../ports/VaultPort';
-import type { CourseState, LearningAction, LearningTurnMode, LessonSession, LoadedLessonRef } from '../../state/types';
+import type { CourseState, LearningAction, LearningTurnMode, LessonSession, LoadedLessonRef } from '../../domain/types';
 import { sourcePathFromText } from '../SourceLoader';
 import type { LessonProgression } from './LessonProgression';
 

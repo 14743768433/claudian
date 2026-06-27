@@ -2,7 +2,7 @@ import type { LearningTurnPort } from '../../ports/LearningTurnPort';
 import type { NoticePort } from '../../ports/NoticePort';
 import type { LearningActionApplier } from '../LearningActionApplier';
 import { SummaryService } from '../SummaryService';
-import type { LearningAction, LearningActionResult, LessonSession } from '../../state/types';
+import type { LearningAction, LearningActionResult, LessonSession } from '../../domain/types';
 
 export class LessonProgression {
   constructor(

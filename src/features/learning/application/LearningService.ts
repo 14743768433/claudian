@@ -3,21 +3,21 @@ import type {
   LearningLessonPlanSource,
 } from '../../../core/types';
 import type { ChatTurnRequest } from '../../../core/runtime/types';
-import { SkillSeeder } from '../content/SkillSeeder';
-import { TransformationRegistry } from '../content/TransformationRegistry';
+import { SkillSeeder } from './content/SkillSeeder';
+import { TransformationRegistry } from './content/TransformationRegistry';
 import { CommandCoordinator } from './coordinators/CommandCoordinator';
 import { LessonProgression } from './coordinators/LessonProgression';
 import { NavigationCoordinator } from './coordinators/NavigationCoordinator';
 import { TurnCoordinator, type LearningTurnCompletion } from './coordinators/TurnCoordinator';
 import { IndexRepository } from './IndexRepository';
-import { learningAppendix } from '../prompt/learningAppendix';
-import { LearningStateService } from '../state/LearningStateService';
+import { learningAppendix } from './learningAppendix';
 import { StateTransitionService } from './StateTransitionService';
-import type { CourseIndexEntry, CourseState, LearningAction, LearningTurnMode, LessonSession, LoadedLessonRef } from '../state/types';
+import type { CourseIndexEntry, CourseState, LearningAction, LearningTurnMode, LessonSession, LoadedLessonRef } from '../domain/types';
 import type { LearningActionApplier } from './LearningActionApplier';
 import type { LearningOpenTab, LearningTurnPort } from '../ports/LearningTurnPort';
 import type { LayoutPort } from '../ports/LayoutPort';
 import type { NoticePort } from '../ports/NoticePort';
+import type { StatePort } from '../ports/StatePort';
 import type { VaultPort } from '../ports/VaultPort';
 import { LearningReadModel, type LearningConversationStatus } from './LearningReadModel';
 import { SourceLoader, type LessonNoteSnippet, type SourceSnippet } from './SourceLoader';
@@ -49,13 +49,17 @@ export interface LearningServiceDependencies {
   turns: LearningTurnPort;
   notice: NoticePort;
   indexRepository: IndexRepository;
-  stateService: LearningStateService;
+  stateService: LearningStateStore;
   stateMachine: LearningActionApplier;
   transitionService: StateTransitionService;
   progression: LessonProgression;
   skillSeeder: SkillSeeder;
   sourceLoader: SourceLoader;
 }
+
+export type LearningStateStore = StatePort & {
+  currentLesson(course: CourseState): LessonSession | null;
+};
 
 function learningActivity(
   label: string,
@@ -366,7 +370,7 @@ function buildLessonReviewPrompt(
 
 export class LearningService {
   readonly indexRepository: IndexRepository;
-  readonly stateService: LearningStateService;
+  readonly stateService: LearningStateStore;
   readonly stateMachine: LearningActionApplier;
   readonly transitionService: StateTransitionService;
 

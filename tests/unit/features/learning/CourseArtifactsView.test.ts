@@ -2,7 +2,7 @@ import { createMockEl } from '@test/helpers/mockElement';
 
 import type { LearningLessonPlanContentBlock } from '@/core/types';
 import { CourseArtifactsView } from '@/features/learning/views/CourseArtifactsView';
-import type { CourseState } from '@/features/learning/state/types';
+import type { CourseState } from '@/features/learning/domain/types';
 
 function makeCourse(): CourseState {
   return {

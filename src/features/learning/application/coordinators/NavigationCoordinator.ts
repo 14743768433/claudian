@@ -1,7 +1,7 @@
 import type { LearningLessonPlanSource } from '../../../../core/types';
 import type { LayoutPort } from '../../ports/LayoutPort';
 import type { NoticePort } from '../../ports/NoticePort';
-import type { CourseState, LessonSession } from '../../state/types';
+import type { CourseState, LessonSession } from '../../domain/types';
 import type { LearningActionApplier } from '../LearningActionApplier';
 import { SourceLoader, sourcePathFromText } from '../SourceLoader';
 

@@ -5,7 +5,7 @@ import type {
 } from '../../../core/types';
 import type { LearningTurnPort } from '../ports/LearningTurnPort';
 import type { VaultPort } from '../ports/VaultPort';
-import type { LessonSession } from '../state/types';
+import type { LessonSession } from '../domain/types';
 
 export interface SourceSnippet {
   label: string;

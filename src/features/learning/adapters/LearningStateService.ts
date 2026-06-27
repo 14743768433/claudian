@@ -1,4 +1,4 @@
-import { normalizeLearningPath } from './path';
+import { normalizeLearningPath } from '../domain/path';
 import { LearningPluginIndex } from './LearningPluginIndex';
 import {
   COURSE_STATE_FILE,
@@ -10,7 +10,7 @@ import {
   LessonStatus,
   LoadedLessonRef,
   SectionStatus,
-} from './types';
+} from '../domain/types';
 
 interface LearningStateFileAccess {
   exists(path: string): Promise<boolean>;

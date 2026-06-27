@@ -1,5 +1,5 @@
 import type { CourseIndexEntry, CourseState } from '../domain/types';
-import { normalizeLearningPath } from '../state/path';
+import { normalizeLearningPath } from '../domain/path';
 import type { StatePort } from '../ports/StatePort';
 
 type IndexStatePort = Pick<StatePort, 'listIndex' | 'upsertIndex' | 'removeIndex'>;

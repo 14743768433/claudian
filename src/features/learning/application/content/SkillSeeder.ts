@@ -1,4 +1,4 @@
-import type { VaultPort } from '../ports/VaultPort';
+import type { VaultPort } from '../../ports/VaultPort';
 import { TransformationRegistry } from './TransformationRegistry';
 
 const SKILL_DIR_BY_ID = {

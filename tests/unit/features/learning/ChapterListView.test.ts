@@ -1,7 +1,7 @@
 import { createMockEl } from '@test/helpers/mockElement';
 
 import { ChapterListView } from '@/features/learning/views/ChapterListView';
-import type { CourseState } from '@/features/learning/state/types';
+import type { CourseState } from '@/features/learning/domain/types';
 
 function makeCourse(input: {
   courseId: string;

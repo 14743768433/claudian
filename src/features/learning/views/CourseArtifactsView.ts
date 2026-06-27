@@ -2,7 +2,7 @@ import { ItemView, Notice, type WorkspaceLeaf } from 'obsidian';
 
 import type { LearningLessonPlanContentBlock, LearningLessonPlanSource, MessageUiBlock } from '../../../core/types';
 import type ClaudianPlugin from '../../../main';
-import type { CourseState, LessonSession } from '../state/types';
+import type { CourseState, LessonSession } from '../domain/types';
 import { VIEW_TYPE_COURSE_ARTIFACTS } from './viewTypes';
 
 function isLessonPlanBlock(block: unknown): block is LearningLessonPlanContentBlock {

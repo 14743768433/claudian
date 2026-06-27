@@ -1,7 +1,7 @@
 import { ItemView, Modal, Notice, Setting, type WorkspaceLeaf } from 'obsidian';
 
 import type ClaudianPlugin from '../../../main';
-import type { CourseIndexEntry } from '../state/types';
+import type { CourseIndexEntry } from '../domain/types';
 import { VIEW_TYPE_COURSE_LIBRARY } from './viewTypes';
 
 class NewCourseModal extends Modal {

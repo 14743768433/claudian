@@ -1,6 +1,6 @@
-import { LearningPluginIndex } from '../state/LearningPluginIndex';
-import { LearningStateService } from '../state/LearningStateService';
-import type { CourseIndexEntry, LoadedLessonRef } from '../state/types';
+import { LearningPluginIndex } from './LearningPluginIndex';
+import { LearningStateService } from './LearningStateService';
+import type { CourseIndexEntry, LoadedLessonRef } from '../domain/types';
 import type { StatePort } from '../ports/StatePort';
 import type { VaultPort } from '../ports/VaultPort';
 

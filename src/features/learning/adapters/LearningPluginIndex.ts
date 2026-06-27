@@ -1,5 +1,5 @@
-import type { CourseIndexEntry, CourseState, LearningPluginData } from './types';
-import { normalizeLearningPath } from './path';
+import type { CourseIndexEntry, CourseState, LearningPluginData } from '../domain/types';
+import { normalizeLearningPath } from '../domain/path';
 
 type PluginDataAccess = {
   loadData(): Promise<unknown>;

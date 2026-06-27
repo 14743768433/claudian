@@ -1,6 +1,6 @@
 import type { ChatMessage } from '../../../core/types';
 import type { LearningTurnPort } from '../ports/LearningTurnPort';
-import type { LessonSession } from '../state/types';
+import type { LessonSession } from '../domain/types';
 
 export class SummaryService {
   constructor(

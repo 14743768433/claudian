@@ -1,7 +1,7 @@
 import { ItemView, Notice, type WorkspaceLeaf } from 'obsidian';
 
 import type ClaudianPlugin from '../../../main';
-import type { CourseState, LessonSession } from '../state/types';
+import type { CourseState, LessonSession } from '../domain/types';
 import { VIEW_TYPE_CHAPTER_LIST } from './viewTypes';
 
 export class ChapterListView extends ItemView {

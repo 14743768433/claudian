@@ -1,4 +1,4 @@
-import type { LearningAction } from '../state/types';
+import type { LearningAction } from '../domain/types';
 
 export interface ParsedActionRequest {
   action: LearningAction;

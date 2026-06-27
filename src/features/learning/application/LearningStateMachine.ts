@@ -1,15 +1,15 @@
 import { LearningStateMachine as DomainLearningStateMachine } from '../domain/LearningStateMachine';
 import type { IndexRepository } from '../application/IndexRepository';
 import { StateTransitionService } from '../application/StateTransitionService';
-import type { LearningStateService } from '../state/LearningStateService';
-import type { CourseState, LearningAction, LearningActionResult } from '../state/types';
+import type { CourseState, LearningAction, LearningActionResult } from '../domain/types';
+import type { StatePort } from '../ports/StatePort';
 
 export class LearningStateMachine {
   private readonly domainMachine = new DomainLearningStateMachine();
   private readonly transitionService: StateTransitionService;
 
   constructor(
-    private readonly stateService: LearningStateService,
+    stateService: Pick<StatePort, 'loadCourse' | 'saveCourse'>,
     indexRepository: IndexRepository | null = null,
   ) {
     this.transitionService = new StateTransitionService(stateService, indexRepository);

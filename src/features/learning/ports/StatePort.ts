@@ -1,4 +1,4 @@
-import type { CourseIndexEntry, CourseState, LoadedLessonRef } from '../state/types';
+import type { CourseIndexEntry, CourseState, LoadedLessonRef } from '../domain/types';
 
 export interface StatePort {
   loadCourse(courseId: string, rootPath?: string): Promise<CourseState | null>;

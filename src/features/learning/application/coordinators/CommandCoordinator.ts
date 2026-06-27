@@ -1,5 +1,5 @@
 import type { NoticePort } from '../../ports/NoticePort';
-import type { CourseState, LessonSession, LoadedLessonRef } from '../../state/types';
+import type { CourseState, LessonSession, LoadedLessonRef } from '../../domain/types';
 import type { LessonProgression } from './LessonProgression';
 
 export interface LearningCommandCourseLookup {

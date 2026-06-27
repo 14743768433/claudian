@@ -1,17 +1,17 @@
-import { LearningContextInjector } from '@/features/learning/context/LearningContextInjector';
-import { ContentQualityGate } from '@/features/learning/content/ContentQualityGate';
+import { LearningContextInjector } from '@/features/learning/application/context/LearningContextInjector';
+import { ContentQualityGate } from '@/features/learning/domain/ContentQualityGate';
 import { LearningController } from '@/features/learning/LearningController';
-import { ActionRequestChannel } from '@/features/learning/flow/ActionRequestChannel';
-import { LearningStateMachine } from '@/features/learning/flow/LearningStateMachine';
+import { ActionRequestChannel } from '@/features/learning/application/ActionRequestChannel';
+import { LearningStateMachine } from '@/features/learning/application/LearningStateMachine';
 import { LearningStateMachine as DomainLearningStateMachine } from '@/features/learning/domain/LearningStateMachine';
-import { SummaryService } from '@/features/learning/flow/SummaryService';
-import { learningAppendix } from '@/features/learning/prompt/learningAppendix';
+import { SummaryService } from '@/features/learning/application/SummaryService';
+import { learningAppendix } from '@/features/learning/application/learningAppendix';
 import { FileStateAdapter } from '@/features/learning/adapters/FileStateAdapter';
 import { IndexRepository } from '@/features/learning/application/IndexRepository';
 import { StateTransitionService } from '@/features/learning/application/StateTransitionService';
-import { LearningPluginIndex } from '@/features/learning/state/LearningPluginIndex';
+import { LearningPluginIndex } from '@/features/learning/adapters/LearningPluginIndex';
 import type { ChatMessage } from '@/core/types';
-import type { CourseState, CreateCourseInput, LessonSession } from '@/features/learning/state/types';
+import type { CourseState, CreateCourseInput, LessonSession } from '@/features/learning/domain/types';
 import { TFile } from 'obsidian';
 
 class MemoryVaultAdapter {

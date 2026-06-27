@@ -6,7 +6,7 @@ import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '../../core/providers/ProviderSettingsCoordinator';
 import { DEFAULT_CHAT_PROVIDER_ID, type ProviderId } from '../../core/providers/types';
 import { VIEW_TYPE_CLAUDIAN } from '../../core/types';
-import type { LearningTurnMode } from '../../features/learning/state/types';
+import type { LearningTurnMode } from '../../features/learning/domain/types';
 import type ClaudianPlugin from '../../main';
 import { createProviderIconSvg } from '../../shared/icons';
 import {

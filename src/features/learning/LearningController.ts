@@ -8,11 +8,11 @@ import { IndexRepository } from './application/IndexRepository';
 import { LearningService } from './application/LearningService';
 import { SourceLoader } from './application/SourceLoader';
 import { StateTransitionService } from './application/StateTransitionService';
-import { SkillSeeder } from './content/SkillSeeder';
-import { LearningStateMachine } from './flow/LearningStateMachine';
+import { SkillSeeder } from './application/content/SkillSeeder';
+import { LearningStateMachine } from './application/LearningStateMachine';
 import { LessonProgression } from './application/coordinators/LessonProgression';
 import { SummaryService } from './application/SummaryService';
-import { LearningPluginIndex } from './state/LearningPluginIndex';
+import { LearningPluginIndex } from './adapters/LearningPluginIndex';
 
 export class LearningController extends LearningService {
   constructor(plugin: ClaudianPlugin) {

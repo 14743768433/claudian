@@ -18,6 +18,7 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 - `TurnCoordinator` owns turn decoration, assistant-turn completion, action result persistence, review next-step persistence, and repair orchestration.
 - `TurnCoordinator` owns deterministic note quality checks and repair-attempt limits.
 - `CommandCoordinator` owns command parsing and the `*FromConversation` command workflows; `LearningService` keeps same public methods as thin compatibility forwards.
+- Learning feature top-level directories are now limited to `adapters/`, `application/`, `domain/`, `ports/`, and `views/`; previous `content/`, `context/`, `flow/`, `prompt/`, and `state/` entrypoints were moved into the layered structure or removed.
 - Obsidian imports in the learning feature are limited to `adapters/**` and `views/**`.
 - `domain/LearningStateMachine` is pure: `reduce(state, action) -> { nextState, effects }`.
 - `application/StateTransitionService` is the persistence path used by business actions and migrated system actions.
@@ -34,10 +35,12 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 - `npm run verify`: passed.
 - `npm run learning:baseline` reports:
   - `src/features/learning/LearningController.ts`: 50 lines.
-  - `src/features/learning/application/LearningService.ts`: 829 lines after coordinator extraction.
+  - `src/features/learning/application/LearningService.ts`: 832 lines after coordinator extraction and directory consolidation.
   - `src/features/chat/controllers/InputController.ts`: 1807 lines.
   - real `saveCourse` call site: `src/features/learning/application/StateTransitionService.ts`.
   - learning-feature `obsidian` imports only in `adapters/**` and `views/**`.
+- `Get-ChildItem -Directory src/features/learning` reports only `adapters`, `application`, `domain`, `ports`, and `views`.
+- `.dependency-cruiser.cjs` now also forbids `application/**` importing `adapters/**` or `views/**`.
 
 ## Remaining Manual Gate
 

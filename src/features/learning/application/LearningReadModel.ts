@@ -2,7 +2,7 @@ import type {
   CourseState,
   LearningTurnMode,
   LoadedLessonRef,
-} from '../state/types';
+} from '../domain/types';
 
 export interface LearningConversationStatus {
   mode: 'Intake' | 'Planning' | 'Teach' | 'Review' | 'Done';

@@ -1,6 +1,6 @@
-import type { ChatTurnRequest } from '../../../core/runtime/types';
+import type { ChatTurnRequest } from '../../../../core/runtime/types';
 import { TransformationRegistry } from '../content/TransformationRegistry';
-import type { CourseState, LearningTurnMode, LessonSession, Section } from '../state/types';
+import type { CourseState, LearningTurnMode, LessonSession, Section } from '../../domain/types';
 
 export interface LearningTurnContext {
   course: CourseState;

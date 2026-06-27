@@ -29,6 +29,12 @@ module.exports = {
       to: { path: '^src/(main|core/runtime|features/chat)' },
     },
     {
+      name: 'learning-application-no-adapters-or-views',
+      severity: ERROR,
+      from: { path: `${LEARN}/application` },
+      to: { path: `${LEARN}/(adapters|views)` },
+    },
+    {
       name: 'learning-only-adapters-views-controller-import-obsidian',
       severity: ERROR,
       from: {
