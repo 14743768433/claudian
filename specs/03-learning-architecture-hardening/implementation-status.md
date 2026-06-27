@@ -13,6 +13,7 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 - `dependency-cruiser` is installed, `npm run depcruise` is configured, and rules run with `severity: "error"`.
 - `npm run learning:architecture-audit` is configured and included in `npm run verify`; it fails on legacy learning entrypoint imports, wrong top-level learning directories, illegal learning Obsidian imports, and `.saveCourse()` calls outside `StateTransitionService`.
 - Jest includes a persisted core-loop smoke for create course -> generate syllabus -> plan chapter -> write/register section note -> advance section -> start new lesson -> simulated restart restore from the plugin index and `course-state.json`.
+- `npm run learning:deploy-test-vault` copies build outputs into the local test vault plugin directory and runs the deployment verifier.
 - `npm run learning:verify-test-vault` verifies that `main.js`, `styles.css`, and `manifest.json` in `ai-tutor-test-vault/.obsidian/plugins/claudian-ai-tutor` match the current build outputs by SHA-256.
 - `npm run verify` passes locally: depcruise, typecheck, full Jest, build.
 - Learning ports and adapters exist: `StatePort`, `VaultPort`, `LayoutPort`, `NoticePort`, `LearningTurnPort`; `ObsidianVaultAdapter`, `ObsidianLayoutAdapter`, `ObsidianNoticeAdapter`, `ClaudianTurnAdapter`, `FileStateAdapter`.
@@ -37,6 +38,7 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 - `npm test`: passed, 245 suites / 5853 tests.
 - `npm run build`: passed.
 - `npm run verify`: passed.
+- `npm run learning:deploy-test-vault`: passed.
 - `npm run learning:verify-test-vault`: passed.
 - `npm run learning:baseline` reports:
   - `src/features/learning/LearningController.ts`: 50 lines.

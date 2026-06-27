@@ -9,7 +9,7 @@ Plugin dir: `D:\claudian\ai-tutor-test-vault\.obsidian\plugins\claudian-ai-tutor
 Before testing:
 
 - Run `npm run build`.
-- Copy `main.js`, `styles.css`, and `manifest.json` into the plugin dir.
+- Run `npm run learning:deploy-test-vault`.
 - Run `npm run learning:verify-test-vault` and confirm it passes.
 - In Obsidian, reload or re-enable the AI Tutor plugin.
 
@@ -34,4 +34,3 @@ Result:
 - [ ] Fail
 
 Notes / regressions:
-

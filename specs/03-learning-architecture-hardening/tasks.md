@@ -49,6 +49,7 @@
 - [x] 把 `.dependency-cruiser.cjs` 规则逐条从 `warn` 升 `error`，修到 **0 violation**。
 - [x] `npm run depcruise` 接入 CI / 与 typecheck 并列。
 - [x] `npm run learning:architecture-audit` 接入 `verify`，硬性检查五层目录、旧入口残留、非法 Obsidian import、绕过 `StateTransitionService` 的 `.saveCourse()`。
+- [x] `npm run learning:deploy-test-vault` 可将当前 build 输出部署到本机测试 vault，并自动运行部署校验。
 - [x] `npm run learning:verify-test-vault` 可校验本机测试 vault 插件文件与当前 build 输出一致。
 - [ ] （可选）加 `eslint-plugin-boundaries` strict 供 IDE 即时报错。
 - [x] `grep "from 'obsidian'"` 仅命中 `adapters/**` `views/**`。
