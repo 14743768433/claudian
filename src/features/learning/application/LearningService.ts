@@ -24,6 +24,7 @@ import type { LearningOpenTab, LearningTurnPort } from '../ports/LearningTurnPor
 import type { LayoutPort } from '../ports/LayoutPort';
 import type { NoticePort } from '../ports/NoticePort';
 import type { VaultPort } from '../ports/VaultPort';
+import { LearningReadModel, type LearningConversationStatus } from './LearningReadModel';
 
 function actionNeedsQualityGate(action: LearningAction): action is Extract<LearningAction, { type: 'sectionNoteWritten' }> {
   return action.type === 'sectionNoteWritten';
@@ -82,16 +83,6 @@ function messageLooksLikeAssistantResponse(message: unknown): boolean {
 
 function messagesHaveAssistantResponse(messages: unknown[] | undefined): boolean {
   return Array.isArray(messages) && messages.some(messageLooksLikeAssistantResponse);
-}
-
-export interface LearningConversationStatus {
-  mode: 'Intake' | 'Planning' | 'Teach' | 'Review' | 'Done';
-  turnMode: LearningTurnMode;
-  courseTitle: string;
-  lessonTitle: string;
-  chapterLabel: string;
-  sectionLabel: string;
-  machineState: CourseState['machineState'];
 }
 
 export interface LearningActionOutcome {
@@ -660,6 +651,7 @@ export class LearningService {
   private readonly skillSeeder: SkillSeeder;
   private readonly conversationCache = new Map<string, LoadedLessonRef>();
   private readonly conversationTurnModes = new Map<string, LearningTurnMode>();
+  private readonly readModel = new LearningReadModel(this.conversationCache, this.conversationTurnModes);
   private readonly lessonKickoffsInFlight = new Set<string>();
   private readonly repairAttempts = new Map<string, number>();
   private readonly maxRepairAttempts = 2;
@@ -762,77 +754,39 @@ export class LearningService {
   }
 
   canStartNewLesson(conversationId: string | null): boolean {
-    if (!conversationId) return false;
-    const ref = this.conversationCache.get(conversationId);
-    return ref ? this.isStartNewLessonReady(ref) : false;
+    return this.readModel.canStartNewLesson(conversationId);
   }
 
   canAdvanceSection(conversationId: string | null): boolean {
-    if (!conversationId) return false;
-    const ref = this.conversationCache.get(conversationId);
-    return ref ? this.isAdvanceSectionReady(ref) : false;
+    return this.readModel.canAdvanceSection(conversationId);
   }
 
   canWriteSectionNote(conversationId: string | null): boolean {
-    if (!conversationId) return false;
-    const ref = this.conversationCache.get(conversationId);
-    return ref ? this.isWriteSectionNoteReady(ref) : false;
+    return this.readModel.canWriteSectionNote(conversationId);
   }
 
   canPracticeSection(conversationId: string | null): boolean {
-    if (!conversationId) return false;
-    const ref = this.conversationCache.get(conversationId);
-    return ref ? this.isPracticeSectionReady(ref) : false;
+    return this.readModel.canPracticeSection(conversationId);
   }
 
   canReviewLesson(conversationId: string | null): boolean {
-    if (!conversationId) return false;
-    const ref = this.conversationCache.get(conversationId);
-    return ref ? this.isReviewLessonReady(ref) : false;
+    return this.readModel.canReviewLesson(conversationId);
   }
 
   getAdvanceSectionLabel(conversationId: string | null): string | null {
-    if (!conversationId) return null;
-    const ref = this.conversationCache.get(conversationId);
-    if (!ref || !this.isAdvanceSectionReady(ref)) return null;
-    return ref.lesson.currentSectionIndex >= ref.lesson.sections.length - 1
-      ? 'Finish chapter'
-      : 'Next section';
+    return this.readModel.getAdvanceSectionLabel(conversationId);
   }
 
   getConversationStatus(conversationId: string | null): LearningConversationStatus | null {
-    if (!conversationId) return null;
-    const ref = this.conversationCache.get(conversationId);
-    if (!ref) return null;
-
-    const { course, lesson } = ref;
-    const currentSection = lesson.sections[lesson.currentSectionIndex] ?? null;
-    const sectionLabel = currentSection
-      ? `${lesson.currentSectionIndex + 1}/${lesson.sections.length} ${currentSection.title}`
-      : 'No sections planned';
-
-    return {
-      mode: this.statusMode(course.machineState),
-      turnMode: this.getConversationTurnMode(conversationId),
-      courseTitle: course.title,
-      lessonTitle: lesson.title,
-      chapterLabel: lesson.kind === 'intake' ? 'Intake' : `Chapter ${lesson.chapterNumber}`,
-      sectionLabel,
-      machineState: course.machineState,
-    };
+    return this.readModel.getConversationStatus(conversationId);
   }
 
   setConversationTurnMode(conversationId: string | null, mode: LearningTurnMode): boolean {
-    if (!conversationId || !this.conversationCache.has(conversationId)) {
-      return false;
-    }
-    this.conversationTurnModes.set(conversationId, mode);
-    return true;
+    return this.readModel.setConversationTurnMode(conversationId, mode);
   }
 
   getConversationTurnMode(conversationId: string | null): LearningTurnMode {
-    if (!conversationId) return 'teach';
-    return this.conversationTurnModes.get(conversationId) ?? 'teach';
+    return this.readModel.getConversationTurnMode(conversationId);
   }
 
   async handleUserCommand(conversationId: string | null, text: string): Promise<boolean> {
@@ -866,7 +820,7 @@ export class LearningService {
     }
 
     if (isStartNewLessonCommand(text)) {
-      if (this.isCurrentLessonWaitingForKickoff(ref) && !(await this.hasConversationAssistantResponse(ref.lesson.conversationId))) {
+      if (this.readModel.isCurrentLessonWaitingForKickoff(ref) && !(await this.hasConversationAssistantResponse(ref.lesson.conversationId))) {
         await this.openChatConversation(ref.lesson.conversationId);
         return true;
       }
@@ -908,7 +862,7 @@ export class LearningService {
     }
     this.cacheCourse(ref.course);
 
-    if (!this.isWriteSectionNoteReady(ref)) {
+    if (!this.readModel.isWriteSectionNoteReady(ref)) {
       this.notice.notify('AI Tutor can only write a note for the current pending section.');
       this.refreshOpenChatLearningControls();
       return;
@@ -949,7 +903,7 @@ export class LearningService {
     }
     this.cacheCourse(ref.course);
 
-    if (!this.isPracticeSectionReady(ref)) {
+    if (!this.readModel.isPracticeSectionReady(ref)) {
       this.notice.notify('AI Tutor can only practice the current active section.');
       this.refreshOpenChatLearningControls();
       return;
@@ -993,7 +947,7 @@ export class LearningService {
     }
     this.cacheCourse(ref.course);
 
-    if (!this.isReviewLessonReady(ref)) {
+    if (!this.readModel.isReviewLessonReady(ref)) {
       this.notice.notify('AI Tutor can only review a chapter after it is finished.');
       this.refreshOpenChatLearningControls();
       return;
@@ -1018,7 +972,7 @@ export class LearningService {
     }
     this.cacheCourse(ref.course);
 
-    if (!options.force && !this.isStartNewLessonReady(ref)) {
+    if (!options.force && !this.readModel.isStartNewLessonReady(ref)) {
       this.notice.notify('Finish and cover every section before starting a new lesson.');
       this.refreshOpenChatLearningControls();
       return;
@@ -1218,7 +1172,7 @@ export class LearningService {
     course: CourseState,
     lesson: LessonSession,
   ): Promise<LearningNextStepsContentBlock[]> {
-    if (!assistantMessageId || !this.isReviewLessonReady({ course, lesson })) {
+    if (!assistantMessageId || !this.readModel.isReviewLessonReady({ course, lesson })) {
       return [];
     }
 
@@ -1616,7 +1570,7 @@ export class LearningService {
     if (
       lesson
       && lesson.conversationId === conversationId
-      && this.isReviewLessonReady({ course: state, lesson })
+      && this.readModel.isReviewLessonReady({ course: state, lesson })
     ) {
       await this.sendLessonReviewTurn(conversationId, state, lesson);
       return;
@@ -1717,82 +1671,7 @@ export class LearningService {
     }
   }
 
-  private isStartNewLessonReady(ref: LoadedLessonRef): boolean {
-    const { course, lesson } = ref;
-    return course.currentLessonId === lesson.lessonId
-      && course.machineState === 'chapterEnded'
-      && lesson.kind === 'lesson'
-      && lesson.status === 'ended'
-      && lesson.sections.length > 0
-      && lesson.sections.every((section) => section.status === 'covered');
-  }
-
-  private isAdvanceSectionReady(ref: LoadedLessonRef): boolean {
-    const { course, lesson } = ref;
-    const section = lesson.sections[lesson.currentSectionIndex] ?? null;
-    return course.currentLessonId === lesson.lessonId
-      && course.machineState === 'teaching'
-      && lesson.kind === 'lesson'
-      && lesson.status === 'active'
-      && section?.status === 'noteWritten';
-  }
-
-  private isWriteSectionNoteReady(ref: LoadedLessonRef): boolean {
-    const { course, lesson } = ref;
-    const section = lesson.sections[lesson.currentSectionIndex] ?? null;
-    return course.currentLessonId === lesson.lessonId
-      && course.machineState === 'teaching'
-      && lesson.kind === 'lesson'
-      && lesson.status === 'active'
-      && section?.status === 'pending';
-  }
-
-  private isPracticeSectionReady(ref: LoadedLessonRef): boolean {
-    const { course, lesson } = ref;
-    const section = lesson.sections[lesson.currentSectionIndex] ?? null;
-    return course.currentLessonId === lesson.lessonId
-      && course.machineState === 'teaching'
-      && lesson.kind === 'lesson'
-      && lesson.status === 'active'
-      && !!section
-      && (section.status === 'pending' || section.status === 'noteWritten');
-  }
-
-  private isReviewLessonReady(ref: LoadedLessonRef): boolean {
-    const { course, lesson } = ref;
-    return course.currentLessonId === lesson.lessonId
-      && course.machineState === 'chapterEnded'
-      && lesson.kind === 'lesson'
-      && lesson.status === 'ended'
-      && lesson.sections.length > 0;
-  }
-
-  private isCurrentLessonWaitingForKickoff(ref: LoadedLessonRef): boolean {
-    const { course, lesson } = ref;
-    return course.currentLessonId === lesson.lessonId
-      && lesson.kind === 'lesson'
-      && lesson.status === 'active'
-      && (course.machineState === 'chapterPlanning' || course.machineState === 'teaching');
-  }
-
   private async hasConversationAssistantResponse(conversationId: string): Promise<boolean> {
     return this.turns.hasAssistantResponse(conversationId);
-  }
-
-  private statusMode(machineState: CourseState['machineState']): LearningConversationStatus['mode'] {
-    switch (machineState) {
-      case 'intake':
-        return 'Intake';
-      case 'chapterPlanning':
-        return 'Planning';
-      case 'teaching':
-        return 'Teach';
-      case 'chapterEnded':
-        return 'Review';
-      case 'completed':
-        return 'Done';
-      default:
-        return 'Teach';
-    }
   }
 }
