@@ -6,7 +6,7 @@
 
 - 自动化实施项已完成：基线/工具、端口适配器、coordinator/read-model/source-loader 拆分、状态 mutation 收口、InputController hook、depcruise error 规则、全量验证。
 - 未执行的可选项：`eslint-plugin-boundaries` IDE 级补充规则。
-- 未能由 Codex 独立完成的门：真实 Obsidian 手动 smoke，需要用户在 `ai-tutor-test-vault/` 中确认。
+- 未能由 Codex 独立完成的门：真实 Obsidian 手动 smoke，需要用户在 `ai-tutor-smoke-vault/` 中确认。
 
 ## Phase 0 — 基线与工具（先建安全网）
 - [x] **commit 拆两步、严格 scoped**（不污染基线）：

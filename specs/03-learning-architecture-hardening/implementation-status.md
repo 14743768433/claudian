@@ -5,7 +5,7 @@ Branch: `codex/learning-tutor-fork`
 
 ## Status
 
-Automated implementation and verification are complete. Real Obsidian smoke remains pending user confirmation in `ai-tutor-test-vault/`.
+Automated implementation and verification are complete. Real Obsidian smoke remains pending user confirmation in `ai-tutor-smoke-vault/`.
 
 ## Completed
 
@@ -17,6 +17,7 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 - `npm run learning:verify-test-vault` verifies that `main.js`, `styles.css`, and `manifest.json` in `ai-tutor-test-vault/.obsidian/plugins/claudian-ai-tutor` match the current build outputs by SHA-256.
 - `npm run learning:smoke-ready -- --fresh` runs the full automated gate, prepares `ai-tutor-smoke-vault`, enables the plugin, deploys the test vault plugin, verifies deployment hashes, and prints existing course IDs before manual smoke.
 - `npm run learning:verify-manual-smoke` is available as a post-Obsidian-smoke persistence verifier for the tested course state; `-- --list` lists course IDs when the tested course is not the newest entry.
+- `acceptance-audit.md` maps all Stage 03 acceptance criteria to evidence and keeps AC9 marked pending until real Obsidian smoke passes.
 - `npm run verify` passes locally: depcruise, typecheck, full Jest, build.
 - Learning ports and adapters exist: `StatePort`, `VaultPort`, `LayoutPort`, `NoticePort`, `LearningTurnPort`; `ObsidianVaultAdapter`, `ObsidianLayoutAdapter`, `ObsidianNoticeAdapter`, `ClaudianTurnAdapter`, `FileStateAdapter`.
 - `LearningController` is a composition root facade. Current baseline reports about 50 lines versus Phase 0 baseline 1898.
@@ -52,9 +53,10 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
   - learning-feature `obsidian` imports only in `adapters/**` and `views/**`.
 - `Get-ChildItem -Directory src/features/learning` reports only `adapters`, `application`, `domain`, `ports`, and `views`.
 - `.dependency-cruiser.cjs` now also forbids `application/**` importing `adapters/**` or `views/**`.
+- `acceptance-audit.md` records AC 1-8 as automated pass and AC9 as pending real Obsidian smoke.
 
 ## Remaining Manual Gate
 
-- Real Obsidian smoke: new course -> intake -> plan chapter -> write section note -> continue section -> Start new lesson -> restart restore. This needs user-side verification in the test vault.
+- Real Obsidian smoke: new course -> intake -> plan chapter -> write section note -> continue section -> Start new lesson -> restart restore. This needs user-side verification in the clean smoke vault.
 - Before smoke, run `npm run learning:smoke-ready -- --fresh`; use `manual-smoke-checklist.md` in this spec folder to record the user-side smoke result.
 - After that smoke, run `npm run learning:verify-manual-smoke -- --vault ai-tutor-smoke-vault`; use `npm run learning:verify-manual-smoke -- --vault ai-tutor-smoke-vault --list` first if the tested course ID is unclear.
