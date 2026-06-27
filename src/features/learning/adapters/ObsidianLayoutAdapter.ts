@@ -33,16 +33,19 @@ export class ObsidianLayoutAdapter implements LayoutPort {
   }
 
   async ensureSideLeaves(courseId: string): Promise<void> {
-    const leftLeaf = this.plugin.app.workspace.getLeftLeaf(false);
+    const workspace = this.plugin.app.workspace;
+    const leftLeaf = workspace.getLeftLeaf(false) ?? workspace.getLeftLeaf(true);
     if (leftLeaf) {
-      await leftLeaf.setViewState({ type: VIEW_TYPE_CHAPTER_LIST, active: false });
+      await leftLeaf.setViewState({ type: VIEW_TYPE_CHAPTER_LIST, active: true });
       asCourseAwareView(leftLeaf).setCourseId?.(courseId);
+      await revealWorkspaceLeaf(workspace, leftLeaf);
     }
 
-    const rightLeaf = this.plugin.app.workspace.getRightLeaf(false);
+    const rightLeaf = workspace.getRightLeaf(false) ?? workspace.getRightLeaf(true);
     if (rightLeaf) {
-      await rightLeaf.setViewState({ type: VIEW_TYPE_COURSE_ARTIFACTS, active: false });
+      await rightLeaf.setViewState({ type: VIEW_TYPE_COURSE_ARTIFACTS, active: true });
       asCourseAwareView(rightLeaf).setCourseId?.(courseId);
+      await revealWorkspaceLeaf(workspace, rightLeaf);
     }
   }
 
