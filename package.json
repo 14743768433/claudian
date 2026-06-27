@@ -22,6 +22,7 @@
     "learning:baseline": "node scripts/learning-baseline.mjs",
     "learning:architecture-audit": "node scripts/learning-architecture-audit.mjs",
     "learning:deploy-test-vault": "node scripts/deploy-test-vault.mjs",
+    "learning:verify-manual-smoke": "node scripts/verify-manual-smoke-state.mjs",
     "learning:verify-test-vault": "node scripts/verify-test-vault-deploy.mjs",
     "depcruise": "depcruise src --config .dependency-cruiser.cjs",
     "verify": "npm run learning:architecture-audit && npm run depcruise && npm run typecheck && npm test && npm run build",

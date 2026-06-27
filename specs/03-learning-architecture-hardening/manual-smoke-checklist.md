@@ -28,6 +28,16 @@ Core smoke:
 - [ ] Restart Obsidian.
 - [ ] Confirm the course library, current lesson, chapter list, and artifacts restore from persisted state.
 
+Post-smoke persistence check:
+
+- Run `npm run learning:verify-manual-smoke`.
+- If the tested course is not the newest course in `data.json`, run `npm run learning:verify-manual-smoke -- --course-id <courseId>`.
+- Confirm the script reports:
+  - one active current lesson after Start new lesson,
+  - an ended prior chapter with a covered section note,
+  - the current lesson conversation metadata exists,
+  - plugin `data.json` and course `.ai-tutor/course-state.json` agree.
+
 Result:
 
 - [ ] Pass

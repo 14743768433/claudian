@@ -15,6 +15,7 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 - Jest includes a persisted core-loop smoke for create course -> generate syllabus -> plan chapter -> write/register section note -> advance section -> start new lesson -> simulated restart restore from the plugin index and `course-state.json`.
 - `npm run learning:deploy-test-vault` copies build outputs into the local test vault plugin directory and runs the deployment verifier.
 - `npm run learning:verify-test-vault` verifies that `main.js`, `styles.css`, and `manifest.json` in `ai-tutor-test-vault/.obsidian/plugins/claudian-ai-tutor` match the current build outputs by SHA-256.
+- `npm run learning:verify-manual-smoke` is available as a post-Obsidian-smoke persistence verifier for the tested course state.
 - `npm run verify` passes locally: depcruise, typecheck, full Jest, build.
 - Learning ports and adapters exist: `StatePort`, `VaultPort`, `LayoutPort`, `NoticePort`, `LearningTurnPort`; `ObsidianVaultAdapter`, `ObsidianLayoutAdapter`, `ObsidianNoticeAdapter`, `ClaudianTurnAdapter`, `FileStateAdapter`.
 - `LearningController` is a composition root facade. Current baseline reports about 50 lines versus Phase 0 baseline 1898.
@@ -40,6 +41,7 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 - `npm run verify`: passed.
 - `npm run learning:deploy-test-vault`: passed.
 - `npm run learning:verify-test-vault`: passed.
+- `node scripts/verify-manual-smoke-state.mjs --vault <temp-fixture>`: passed against a clean fixture, including BOM-tolerant JSON parsing.
 - `npm run learning:baseline` reports:
   - `src/features/learning/LearningController.ts`: 50 lines.
   - `src/features/learning/application/LearningService.ts`: 832 lines after coordinator extraction and directory consolidation.
@@ -53,3 +55,4 @@ Automated implementation and verification are complete. Real Obsidian smoke rema
 
 - Real Obsidian smoke: new course -> intake -> plan chapter -> write section note -> continue section -> Start new lesson -> restart restore. This needs user-side verification in the test vault.
 - Use `manual-smoke-checklist.md` in this spec folder to record the user-side smoke result.
+- After that smoke, run `npm run learning:verify-manual-smoke` to confirm persisted `data.json`, `course-state.json`, notes, and conversation metadata agree.
