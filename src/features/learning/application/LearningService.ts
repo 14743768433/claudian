@@ -12,13 +12,13 @@ import { ContentQualityGate } from '../content/ContentQualityGate';
 import { SkillSeeder } from '../content/SkillSeeder';
 import { TransformationRegistry } from '../content/TransformationRegistry';
 import { LearningContextInjector } from '../context/LearningContextInjector';
-import { ActionRequestChannel } from '../flow/ActionRequestChannel';
-import { LearningStateMachine } from '../flow/LearningStateMachine';
+import { ActionRequestChannel } from './ActionRequestChannel';
 import { LessonProgression } from './coordinators/LessonProgression';
 import { learningAppendix } from '../prompt/learningAppendix';
 import { LearningPluginIndex } from '../state/LearningPluginIndex';
 import { LearningStateService } from '../state/LearningStateService';
 import type { CourseIndexEntry, CourseState, LearningAction, LearningTurnMode, LessonSession, LoadedLessonRef } from '../state/types';
+import type { LearningActionApplier } from './LearningActionApplier';
 import type { LearningOpenTab, LearningTurnPort } from '../ports/LearningTurnPort';
 import type { LayoutPort } from '../ports/LayoutPort';
 import type { NoticePort } from '../ports/NoticePort';
@@ -116,7 +116,7 @@ export interface LearningServiceDependencies {
   notice: NoticePort;
   index: LearningPluginIndex;
   stateService: LearningStateService;
-  stateMachine: LearningStateMachine;
+  stateMachine: LearningActionApplier;
   progression: LessonProgression;
   skillSeeder: SkillSeeder;
 }
@@ -643,7 +643,7 @@ function buildLessonReviewPrompt(
 export class LearningService {
   readonly index: LearningPluginIndex;
   readonly stateService: LearningStateService;
-  readonly stateMachine: LearningStateMachine;
+  readonly stateMachine: LearningActionApplier;
 
   private readonly adapter: VaultPort;
   private readonly layout: LayoutPort;

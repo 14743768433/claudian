@@ -1,13 +1,13 @@
 import type { LearningTurnPort } from '../../ports/LearningTurnPort';
 import type { NoticePort } from '../../ports/NoticePort';
-import { LearningStateMachine } from '../../flow/LearningStateMachine';
+import type { LearningActionApplier } from '../LearningActionApplier';
 import { SummaryService } from '../SummaryService';
 import type { LearningAction, LearningActionResult, LessonSession } from '../../state/types';
 
 export class LessonProgression {
   constructor(
     private readonly turns: Pick<LearningTurnPort, 'createConversation' | 'getConversationSync' | 'renameConversation'>,
-    private readonly machine: LearningStateMachine,
+    private readonly machine: LearningActionApplier,
     private readonly summaryService: SummaryService,
     private readonly notice: NoticePort = { notify: () => {} },
   ) {}
