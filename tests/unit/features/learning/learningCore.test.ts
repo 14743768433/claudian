@@ -503,6 +503,80 @@ describe('LearningStateMachine', () => {
     expect(next.state?.currentLessonId).toBe('lesson-2');
   });
 
+  it('smokes the persisted learning core loop through restart restore', async () => {
+    const { adapter, service, store } = createStateService();
+    const course = await service.createCourse({
+      title: 'Signals',
+      goalTitle: 'Understand filters',
+      intakeConversationId: 'conv-intake',
+      now: 100,
+    });
+    const machine = new LearningStateMachine(service);
+
+    const syllabus = await machine.applyAction(course.courseId, {
+      type: 'generateSyllabus',
+      topics: [{ title: 'Filters', summary: 'Learn how filters shape signals.' }],
+    });
+    expect(syllabus.ok).toBe(true);
+
+    const planned = await machine.applyAction(course.courseId, {
+      type: 'planChapter',
+      title: 'Filters',
+      sections: [{ id: 's1', title: 'Low-pass intuition' }],
+      conversationId: 'conv-1',
+    });
+    expect(planned.ok).toBe(true);
+    expect(planned.state?.machineState).toBe('teaching');
+
+    const notePath = 'AI Tutor/Courses/signals/lessons/001-filters/part-01-low-pass-intuition.md';
+    await adapter.write(notePath, '# Low-pass intuition\n\nA durable lesson note.');
+    const noteWritten = await machine.applyAction(course.courseId, {
+      type: 'sectionNoteWritten',
+      sectionId: 's1',
+      notePath,
+      noteTitle: 'Low-pass intuition',
+    });
+    expect(noteWritten.ok).toBe(true);
+
+    const advanced = await machine.applyAction(course.courseId, { type: 'advanceSection' });
+    expect(advanced.ok).toBe(true);
+    expect(advanced.state?.machineState).toBe('chapterEnded');
+
+    const next = await machine.applyAction(course.courseId, {
+      type: 'startNewLesson',
+      title: 'Sampling',
+      conversationId: 'conv-2',
+    });
+    expect(next.ok).toBe(true);
+    expect(next.state?.currentLessonId).toBe('lesson-2');
+    expect(next.state?.machineState).toBe('chapterPlanning');
+
+    const restartedIndex = new LearningPluginIndex(store.plugin);
+    const restartedService = new FileStateAdapter(adapter as any, restartedIndex);
+    const restoredFromIndex = await restartedService.loadCurrentCourse();
+    expect(restoredFromIndex).toEqual(expect.objectContaining({
+      courseId: course.courseId,
+      currentLessonId: 'lesson-2',
+      machineState: 'chapterPlanning',
+    }));
+    expect(restartedService.currentLesson(restoredFromIndex as CourseState)).toEqual(expect.objectContaining({
+      title: 'Sampling',
+      conversationId: 'conv-2',
+      previousLessonId: 'lesson-1',
+    }));
+
+    const restoredById = await restartedService.loadCourse(course.courseId);
+    expect(restoredById?.lessons[1]).toEqual(expect.objectContaining({
+      lessonId: 'lesson-1',
+      status: 'ended',
+      sections: [expect.objectContaining({
+        id: 's1',
+        status: 'covered',
+        notePath,
+      })],
+    }));
+  });
+
   it('allows an explicit forced startNewLesson before every section is covered', async () => {
     const { service } = createStateService();
     const course = await service.createCourse({
