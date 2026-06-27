@@ -6,6 +6,7 @@ import type {
   Section,
   SyllabusTopic,
 } from './types';
+import { LEARNING_SCHEMA_VERSION } from './types';
 
 export interface LearningStateTransition {
   ok: boolean;
@@ -59,6 +60,17 @@ function basenameFromPath(value: string): string {
   return normalized.split('/').pop()?.replace(/\.md$/i, '') || normalized;
 }
 
+function slugifyCourseTitle(value: string): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+
+  return slug || 'course';
+}
+
 export class LearningStateMachine {
   reduce(state: CourseState, action: LearningAction): LearningStateTransition {
     const nextState = cloneCourseState(state);
@@ -83,6 +95,8 @@ export class LearningStateMachine {
 
   private applyMutable(state: CourseState, action: LearningAction): LearningActionResult {
     switch (action.type) {
+      case 'courseCreated':
+        return { ok: false, message: 'courseCreated must be applied with createCourse().' };
       case 'generateSyllabus':
         return this.generateSyllabus(state, action);
       case 'planChapter':
@@ -106,6 +120,46 @@ export class LearningStateMachine {
       default:
         return { ok: false, message: 'Unknown AI Tutor action.' };
     }
+  }
+
+  createCourse(action: Extract<LearningAction, { type: 'courseCreated' }>): LearningStateTransition {
+    const title = action.title.trim() || action.goalTitle.trim() || 'Untitled course';
+    const goalTitle = action.goalTitle.trim() || title;
+    const rootPath = normalizeLearningPath(
+      action.rootPath || `AI Tutor/Courses/${slugifyCourseTitle(title)}`,
+    );
+    const intakeLesson: LessonSession = {
+      lessonId: 'lesson-intake',
+      kind: 'intake',
+      chapterNumber: 0,
+      title: 'Intake',
+      conversationId: action.intakeConversationId,
+      status: 'active',
+      sections: [],
+      currentSectionIndex: 0,
+      createdAt: action.now,
+      updatedAt: action.now,
+    };
+
+    const nextState: CourseState = {
+      schemaVersion: LEARNING_SCHEMA_VERSION,
+      courseId: action.courseId,
+      title,
+      goalTitle,
+      rootPath,
+      currentLessonId: intakeLesson.lessonId,
+      machineState: 'intake',
+      syllabus: [],
+      lessons: [intakeLesson],
+      createdAt: action.now,
+      updatedAt: action.now,
+    };
+
+    return {
+      ok: true,
+      nextState,
+      effects: [{ type: 'courseStateChanged', courseId: nextState.courseId }],
+    };
   }
 
   private generateSyllabus(
@@ -265,7 +319,6 @@ export class LearningStateMachine {
 
     const now = Date.now();
     previous.status = 'ended';
-    previous.coveredSummary = action.coveredSummary ?? previous.coveredSummary;
     previous.updatedAt = now;
 
     const chapterNumber = Math.max(0, ...state.lessons.map((lesson) => lesson.chapterNumber)) + 1;

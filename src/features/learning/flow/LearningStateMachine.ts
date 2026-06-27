@@ -1,4 +1,5 @@
 import { LearningStateMachine as DomainLearningStateMachine } from '../domain/LearningStateMachine';
+import type { IndexRepository } from '../application/IndexRepository';
 import { StateTransitionService } from '../application/StateTransitionService';
 import type { LearningStateService } from '../state/LearningStateService';
 import type { CourseState, LearningAction, LearningActionResult } from '../state/types';
@@ -7,8 +8,11 @@ export class LearningStateMachine {
   private readonly domainMachine = new DomainLearningStateMachine();
   private readonly transitionService: StateTransitionService;
 
-  constructor(private readonly stateService: LearningStateService) {
-    this.transitionService = new StateTransitionService(stateService);
+  constructor(
+    private readonly stateService: LearningStateService,
+    indexRepository: IndexRepository | null = null,
+  ) {
+    this.transitionService = new StateTransitionService(stateService, indexRepository);
   }
 
   async applyAction(courseId: string, action: LearningAction): Promise<LearningActionResult> {

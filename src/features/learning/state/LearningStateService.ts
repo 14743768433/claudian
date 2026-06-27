@@ -1,11 +1,10 @@
-import { basenameFromPath, normalizeLearningPath, slugifyCourseTitle } from './path';
+import { normalizeLearningPath } from './path';
 import { LearningPluginIndex } from './LearningPluginIndex';
 import {
   COURSE_STATE_FILE,
   CourseMachineState,
   CourseIndexEntry,
   CourseState,
-  CreateCourseInput,
   LEARNING_SCHEMA_VERSION,
   LessonSession,
   LessonStatus,
@@ -21,10 +20,6 @@ interface LearningStateFileAccess {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-function createId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 const COURSE_MACHINE_STATES: ReadonlySet<CourseMachineState> = new Set([
@@ -121,45 +116,6 @@ export class LearningStateService {
     return statePath(rootPath);
   }
 
-  async createCourse(input: CreateCourseInput): Promise<CourseState> {
-    const now = input.now ?? Date.now();
-    const title = input.title.trim() || input.goalTitle.trim() || 'Untitled course';
-    const goalTitle = input.goalTitle.trim() || title;
-    const courseId = createId('course');
-    const rootPath = normalizeLearningPath(
-      input.rootPath || `AI Tutor/Courses/${slugifyCourseTitle(title)}`,
-    );
-    const intakeLesson: LessonSession = {
-      lessonId: 'lesson-intake',
-      kind: 'intake',
-      chapterNumber: 0,
-      title: 'Intake',
-      conversationId: input.intakeConversationId,
-      status: 'active',
-      sections: [],
-      currentSectionIndex: 0,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    const state: CourseState = {
-      schemaVersion: LEARNING_SCHEMA_VERSION,
-      courseId,
-      title,
-      goalTitle,
-      rootPath,
-      currentLessonId: intakeLesson.lessonId,
-      machineState: 'intake',
-      syllabus: [],
-      lessons: [intakeLesson],
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    await this.saveCourse(state, { preserveUpdatedAt: true });
-    return state;
-  }
-
   async listCourses(): Promise<CourseState[]> {
     const entries = await this.index.listCourses();
     const states: CourseState[] = [];
@@ -211,7 +167,6 @@ export class LearningStateService {
       `${JSON.stringify(next, null, 2)}\n`,
     );
     Object.assign(state, next);
-    await this.index.refreshFromCourseState(next);
   }
 
   currentLesson(state: CourseState): LessonSession | null {
@@ -228,80 +183,6 @@ export class LearningStateService {
       }
     }
     return null;
-  }
-
-  async replaceConversationForLesson(
-    courseId: string,
-    lessonId: string,
-    conversationId: string,
-  ): Promise<CourseState | null> {
-    const state = await this.loadCourse(courseId);
-    if (!state) return null;
-    const lesson = state.lessons.find((candidate) => candidate.lessonId === lessonId);
-    if (!lesson) return null;
-    lesson.conversationId = conversationId;
-    lesson.updatedAt = Date.now();
-    await this.saveCourse(state);
-    return state;
-  }
-
-  async refreshIndexFromCourseStates(): Promise<void> {
-    const entries = await this.index.listCourses();
-    for (const entry of entries) {
-      const state = await this.loadCourse(entry.courseId, entry.rootPath);
-      if (state) {
-        await this.index.refreshFromCourseState(state);
-      }
-    }
-  }
-
-  async handleVaultRename(oldPath: string, newPath: string): Promise<CourseState[]> {
-    const oldNormalized = normalizeLearningPath(oldPath);
-    const newNormalized = normalizeLearningPath(newPath);
-    const changed: CourseState[] = [];
-
-    for (const course of await this.listCourses()) {
-      let didChange = false;
-      for (const lesson of course.lessons) {
-        for (const section of lesson.sections) {
-          if (section.notePath === oldNormalized) {
-            section.notePath = newNormalized;
-            section.noteTitle = basenameFromPath(newNormalized);
-            section.missing = false;
-            didChange = true;
-          }
-        }
-      }
-      if (didChange) {
-        await this.saveCourse(course);
-        changed.push(course);
-      }
-    }
-
-    return changed;
-  }
-
-  async handleVaultDelete(path: string): Promise<CourseState[]> {
-    const normalized = normalizeLearningPath(path);
-    const changed: CourseState[] = [];
-
-    for (const course of await this.listCourses()) {
-      let didChange = false;
-      for (const lesson of course.lessons) {
-        for (const section of lesson.sections) {
-          if (section.notePath === normalized) {
-            section.missing = true;
-            didChange = true;
-          }
-        }
-      }
-      if (didChange) {
-        await this.saveCourse(course);
-        changed.push(course);
-      }
-    }
-
-    return changed;
   }
 
   private async findRootPath(courseId: string): Promise<string | null> {

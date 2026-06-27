@@ -49,11 +49,22 @@ export class LessonProgression {
     const coveredSummary = action.coveredSummary
       ?? (previousLesson ? await this.summaryService.summarizeLesson(previousLesson) : undefined);
 
+    if (previousLesson && coveredSummary) {
+      const summaryResult = await this.machine.applyAction(courseId, {
+        type: 'coveredSummaryWritten',
+        lessonId: previousLesson.lessonId,
+        coveredSummary,
+      });
+      if (!summaryResult.ok) {
+        return summaryResult;
+      }
+    }
+
     const result = await this.machine.applyAction(courseId, {
       ...action,
       type: 'startNewLesson',
       conversationId: conversation.id,
-      coveredSummary,
+      coveredSummary: undefined,
     });
 
     if (result.ok) {

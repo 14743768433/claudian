@@ -6,10 +6,12 @@ import { LearningStateMachine } from '@/features/learning/flow/LearningStateMach
 import { LearningStateMachine as DomainLearningStateMachine } from '@/features/learning/domain/LearningStateMachine';
 import { SummaryService } from '@/features/learning/flow/SummaryService';
 import { learningAppendix } from '@/features/learning/prompt/learningAppendix';
+import { FileStateAdapter } from '@/features/learning/adapters/FileStateAdapter';
+import { IndexRepository } from '@/features/learning/application/IndexRepository';
+import { StateTransitionService } from '@/features/learning/application/StateTransitionService';
 import { LearningPluginIndex } from '@/features/learning/state/LearningPluginIndex';
-import { LearningStateService } from '@/features/learning/state/LearningStateService';
 import type { ChatMessage } from '@/core/types';
-import type { CourseState, LessonSession } from '@/features/learning/state/types';
+import type { CourseState, CreateCourseInput, LessonSession } from '@/features/learning/state/types';
 import { TFile } from 'obsidian';
 
 class MemoryVaultAdapter {
@@ -45,8 +47,29 @@ function createStateService() {
   const store = createPluginDataStore();
   const index = new LearningPluginIndex(store.plugin);
   const adapter = new MemoryVaultAdapter();
-  const service = new LearningStateService(adapter as any, index);
-  return { adapter, index, service, store };
+  const service = new FileStateAdapter(adapter as any, index);
+  const indexRepository = new IndexRepository(service);
+  const transitionService = new StateTransitionService(service, indexRepository);
+  const harness = Object.assign(service, {
+    createCourse: async (input: CreateCourseInput): Promise<CourseState> => {
+      const result = await transitionService.createCourse(input);
+      if (!result.ok || !result.state) throw new Error(result.message ?? 'Failed to create course');
+      return result.state;
+    },
+    replaceConversationForLesson: async (
+      courseId: string,
+      lessonId: string,
+      conversationId: string,
+    ): Promise<CourseState | null> => {
+      const result = await transitionService.applyAction(courseId, {
+        type: 'conversationReplaced',
+        lessonId,
+        conversationId,
+      });
+      return result.state ?? null;
+    },
+  });
+  return { adapter, index, service: harness, indexRepository, transitionService, store };
 }
 
 describe('LearningPluginIndex', () => {
@@ -324,6 +347,32 @@ describe('LearningStateMachine', () => {
     expect(JSON.stringify(course)).toBe(before);
   });
 
+  it('creates the initial course state from a system action', () => {
+    const machine = new DomainLearningStateMachine();
+
+    const result = machine.createCourse({
+      type: 'courseCreated',
+      courseId: 'course-fixed',
+      title: 'Signals',
+      goalTitle: 'Understand filters',
+      intakeConversationId: 'conv-intake',
+      now: 100,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.nextState).toEqual(expect.objectContaining({
+      courseId: 'course-fixed',
+      rootPath: 'AI Tutor/Courses/signals',
+      currentLessonId: 'lesson-intake',
+      machineState: 'intake',
+    }));
+    expect(result.nextState?.lessons[0]).toEqual(expect.objectContaining({
+      kind: 'intake',
+      conversationId: 'conv-intake',
+      status: 'active',
+    }));
+  });
+
   it('applies system actions for note files and conversation replacement', async () => {
     const { service } = createStateService();
     const course = await service.createCourse({
@@ -369,6 +418,33 @@ describe('LearningStateMachine', () => {
       path: 'AI Tutor/Courses/signals/new-name.md',
     }).nextState!;
     expect(deleted.lessons.find((lesson) => lesson.lessonId === 'lesson-1')?.sections[0].missing).toBe(true);
+  });
+
+  it('writes covered summaries through a system action', async () => {
+    const { service } = createStateService();
+    const course = await service.createCourse({
+      title: 'Signals',
+      goalTitle: 'Understand filters',
+      intakeConversationId: 'conv-intake',
+      now: 100,
+    });
+    const machine = new DomainLearningStateMachine();
+    const planned = machine.reduce(course, {
+      type: 'planChapter',
+      title: 'Filters',
+      sections: [{ id: 's1', title: 'Low-pass intuition' }],
+      conversationId: 'conv-1',
+    }).nextState!;
+
+    const result = machine.reduce(planned, {
+      type: 'coveredSummaryWritten',
+      lessonId: 'lesson-1',
+      coveredSummary: 'Covered low-pass filter intuition.',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.nextState?.lessons.find((lesson) => lesson.lessonId === 'lesson-1')?.coveredSummary)
+      .toBe('Covered low-pass filter intuition.');
   });
 
   it('rejects advancing before the current section note is written', async () => {

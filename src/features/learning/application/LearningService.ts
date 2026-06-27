@@ -14,9 +14,10 @@ import { TransformationRegistry } from '../content/TransformationRegistry';
 import { LearningContextInjector } from '../context/LearningContextInjector';
 import { ActionRequestChannel } from './ActionRequestChannel';
 import { LessonProgression } from './coordinators/LessonProgression';
+import { IndexRepository } from './IndexRepository';
 import { learningAppendix } from '../prompt/learningAppendix';
-import { LearningPluginIndex } from '../state/LearningPluginIndex';
 import { LearningStateService } from '../state/LearningStateService';
+import { StateTransitionService } from './StateTransitionService';
 import type { CourseIndexEntry, CourseState, LearningAction, LearningTurnMode, LessonSession, LoadedLessonRef } from '../state/types';
 import type { LearningActionApplier } from './LearningActionApplier';
 import type { LearningOpenTab, LearningTurnPort } from '../ports/LearningTurnPort';
@@ -114,9 +115,10 @@ export interface LearningServiceDependencies {
   layout: LayoutPort;
   turns: LearningTurnPort;
   notice: NoticePort;
-  index: LearningPluginIndex;
+  indexRepository: IndexRepository;
   stateService: LearningStateService;
   stateMachine: LearningActionApplier;
+  transitionService: StateTransitionService;
   progression: LessonProgression;
   skillSeeder: SkillSeeder;
 }
@@ -641,9 +643,10 @@ function buildLessonReviewPrompt(
 }
 
 export class LearningService {
-  readonly index: LearningPluginIndex;
+  readonly indexRepository: IndexRepository;
   readonly stateService: LearningStateService;
   readonly stateMachine: LearningActionApplier;
+  readonly transitionService: StateTransitionService;
 
   private readonly adapter: VaultPort;
   private readonly layout: LayoutPort;
@@ -666,15 +669,18 @@ export class LearningService {
     this.layout = deps.layout;
     this.turns = deps.turns;
     this.notice = deps.notice;
-    this.index = deps.index;
+    this.indexRepository = deps.indexRepository;
     this.stateService = deps.stateService;
     this.stateMachine = deps.stateMachine;
+    this.transitionService = deps.transitionService;
     this.progression = deps.progression;
     this.skillSeeder = deps.skillSeeder;
   }
 
   async initialize(): Promise<void> {
-    await this.stateService.refreshIndexFromCourseStates();
+    for (const course of await this.stateService.listCourses()) {
+      await this.indexRepository.refreshFromCourseState(course);
+    }
     await this.refreshConversationCache();
     await this.skillSeeder.seedVaultSkills().catch(() => {
       this.notice.notify('AI Tutor could not seed .claude skill templates.');
@@ -686,7 +692,7 @@ export class LearningService {
   }
 
   async listCourseEntries(): Promise<CourseIndexEntry[]> {
-    return this.index.listCourses();
+    return this.indexRepository.listCourses();
   }
 
   async loadCourse(courseId: string): Promise<CourseState | null> {
@@ -700,11 +706,15 @@ export class LearningService {
   async createCourse(input: { title: string; goalTitle: string }): Promise<CourseState> {
     const conversation = await this.turns.createConversation();
     await this.turns.renameConversation(conversation.id, `${input.title} · Intake`);
-    const course = await this.stateService.createCourse({
+    const result = await this.transitionService.createCourse({
       title: input.title,
       goalTitle: input.goalTitle,
       intakeConversationId: conversation.id,
     });
+    if (!result.ok || !result.state) {
+      throw new Error(result.message ?? 'AI Tutor could not create the course.');
+    }
+    const course = result.state;
     this.cacheCourse(course);
     this.notice.notify('Course created. Read or add source material, then ask AI Tutor to plan the course.');
     await this.enterCourse(course.courseId);

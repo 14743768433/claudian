@@ -81,6 +81,7 @@ export interface CreateCourseInput {
   rootPath?: string;
   intakeConversationId: string;
   now?: number;
+  courseId?: string;
 }
 
 export interface LearningPlanSourceRef {
@@ -103,6 +104,15 @@ export interface LoadedLessonRef {
 }
 
 export type LearningAction =
+  | {
+      type: 'courseCreated';
+      courseId: string;
+      title: string;
+      goalTitle: string;
+      rootPath?: string;
+      intakeConversationId: string;
+      now: number;
+    }
   | {
       type: 'generateSyllabus';
       topics: Array<{
