@@ -82,6 +82,8 @@ data.json
 
 # Test artifacts
 test-results/
+ai-tutor-test-vault/
+ai-tutor-smoke-vault/
 
 # Development files
 sandbox/

@@ -3,12 +3,14 @@
 Status: pending user confirmation
 Date:
 Tester:
-Vault: `D:\claudian\ai-tutor-test-vault`
-Plugin dir: `D:\claudian\ai-tutor-test-vault\.obsidian\plugins\claudian-ai-tutor`
+Recommended clean vault: `D:\claudian\ai-tutor-smoke-vault`
+Plugin dir: `D:\claudian\ai-tutor-smoke-vault\.obsidian\plugins\claudian-ai-tutor`
+Legacy test vault, if needed: `D:\claudian\ai-tutor-test-vault`
 
 Before testing:
 
-- Run `npm run learning:smoke-ready`; this runs `verify`, deploys the current build to the test vault, verifies deployed hashes, and prints existing course IDs.
+- Run `npm run learning:smoke-ready -- --fresh`; this runs `verify`, prepares a clean smoke vault, enables the plugin, deploys the current build, verifies deployed hashes, and prints existing course IDs.
+- If you deliberately want the legacy test vault instead, run `npm run learning:smoke-ready`.
 - In Obsidian, reload or re-enable the AI Tutor plugin.
 
 Core smoke:
@@ -28,9 +30,9 @@ Core smoke:
 
 Post-smoke persistence check:
 
-- If needed, run `npm run learning:verify-manual-smoke -- --list` to find the tested `courseId`.
-- Run `npm run learning:verify-manual-smoke`.
-- If the tested course is not the newest course in `data.json`, run `npm run learning:verify-manual-smoke -- --course-id <courseId>`.
+- If needed for the recommended clean vault, run `npm run learning:verify-manual-smoke -- --vault ai-tutor-smoke-vault --list` to find the tested `courseId`.
+- For the recommended clean vault, run `npm run learning:verify-manual-smoke -- --vault ai-tutor-smoke-vault`.
+- If you used the legacy test vault and the tested course is not the newest course in `data.json`, run `npm run learning:verify-manual-smoke -- --course-id <courseId>`.
 - Confirm the script reports:
   - one active current lesson after Start new lesson,
   - an ended prior chapter with a covered section note,
