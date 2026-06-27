@@ -15,6 +15,7 @@ import { LearningContextInjector } from '../context/LearningContextInjector';
 import { ActionRequestChannel } from './ActionRequestChannel';
 import { CommandCoordinator } from './coordinators/CommandCoordinator';
 import { LessonProgression } from './coordinators/LessonProgression';
+import { NavigationCoordinator } from './coordinators/NavigationCoordinator';
 import { IndexRepository } from './IndexRepository';
 import { learningAppendix } from '../prompt/learningAppendix';
 import { LearningStateService } from '../state/LearningStateService';
@@ -591,6 +592,7 @@ export class LearningService {
   private readonly progression: LessonProgression;
   private readonly skillSeeder: SkillSeeder;
   private readonly sourceLoader: SourceLoader;
+  private readonly navigationCoordinator: NavigationCoordinator;
   private readonly commandCoordinator: CommandCoordinator;
   private readonly conversationCache = new Map<string, LoadedLessonRef>();
   private readonly conversationTurnModes = new Map<string, LearningTurnMode>();
@@ -611,6 +613,16 @@ export class LearningService {
     this.progression = deps.progression;
     this.skillSeeder = deps.skillSeeder;
     this.sourceLoader = deps.sourceLoader;
+    this.navigationCoordinator = new NavigationCoordinator({
+      layout: this.layout,
+      notice: this.notice,
+      stateService: this.stateService,
+      stateMachine: this.stateMachine,
+      sourceLoader: this.sourceLoader,
+      cacheCourse: (course) => this.cacheCourse(course),
+      ensureLessonConversation: (course, lesson) => this.ensureLessonConversation(course, lesson),
+      openChatConversation: (conversationId) => this.openChatConversation(conversationId),
+    });
     this.commandCoordinator = new CommandCoordinator({
       courseLookup: this.stateService,
       readModel: this.readModel,
@@ -671,43 +683,15 @@ export class LearningService {
   }
 
   async openLibrary(): Promise<void> {
-    await this.layout.openLibraryTab();
+    await this.navigationCoordinator.openLibrary();
   }
 
   async enterCourse(courseId: string): Promise<void> {
-    const course = await this.stateService.loadCourse(courseId);
-    if (!course) {
-      this.notice.notify('AI Tutor course state could not be loaded.');
-      return;
-    }
-    this.cacheCourse(course);
-    await this.arrangeLearningLayout(course.courseId);
+    await this.navigationCoordinator.enterCourse(courseId);
   }
 
   async enterLesson(courseId: string, lessonId: string): Promise<void> {
-    const course = await this.stateService.loadCourse(courseId);
-    if (!course) {
-      this.notice.notify('AI Tutor course state could not be loaded.');
-      return;
-    }
-    const lesson = course.lessons.find((candidate) => candidate.lessonId === lessonId);
-    if (!lesson) {
-      this.notice.notify('AI Tutor lesson could not be found.');
-      return;
-    }
-    const ensuredCourse = await this.ensureLessonConversation(course, lesson);
-    const result = await this.stateMachine.applyAction(ensuredCourse.courseId, {
-      type: 'lessonSelected',
-      lessonId,
-    });
-    if (!result.ok || !result.state) {
-      this.notice.notify(result.message ?? 'AI Tutor lesson could not be selected.');
-      return;
-    }
-    const selectedLesson = result.state.lessons.find((candidate) => candidate.lessonId === lessonId) ?? lesson;
-    this.cacheCourse(result.state);
-    await this.openChatConversation(selectedLesson.conversationId);
-    await this.refreshOpenLearningViews(result.state.courseId);
+    await this.navigationCoordinator.enterLesson(courseId, lessonId);
   }
 
   canStartNewLesson(conversationId: string | null): boolean {
@@ -922,16 +906,7 @@ export class LearningService {
   }
 
   async arrangeLearningLayout(courseId: string): Promise<void> {
-    const course = await this.stateService.loadCourse(courseId);
-    if (!course) return;
-    const lesson = this.stateService.currentLesson(course);
-    if (!lesson) return;
-
-    const ensuredCourse = await this.ensureLessonConversation(course, lesson);
-    const ensuredLesson = this.stateService.currentLesson(ensuredCourse) ?? lesson;
-
-    await this.layout.ensureSideLeaves(courseId);
-    await this.openChatConversation(ensuredLesson.conversationId);
+    await this.navigationCoordinator.arrangeLearningLayout(courseId);
   }
 
   decorateTurnRequestSync(
@@ -1141,31 +1116,11 @@ export class LearningService {
   }
 
   async openNote(path: string): Promise<void> {
-    try {
-      await this.layout.revealNotePane(path);
-    } catch {
-      this.notice.notify('AI Tutor note file is missing.');
-    }
+    await this.navigationCoordinator.openNote(path);
   }
 
   async openSource(source: string | LearningLessonPlanSource): Promise<void> {
-    const label = typeof source === 'string' ? source.trim() : source.label.trim();
-    const requestedPath = typeof source === 'string'
-      ? sourcePathFromText(label) ?? label
-      : source.path?.trim() || sourcePathFromText(source.label) || '';
-    const resolvedPath = await this.sourceLoader.resolveSourceVaultPath(requestedPath);
-    if (resolvedPath) {
-      await this.layout.revealNotePane(resolvedPath);
-      return;
-    }
-
-    const cardId = typeof source === 'string' ? null : source.cardId;
-    if (cardId && !requestedPath) {
-      this.notice.notify('This source is an external card, not a vault note yet.');
-      return;
-    }
-
-    this.notice.notify(`AI Tutor source could not be opened: ${label || requestedPath || 'unknown source'}.`);
+    await this.navigationCoordinator.openSource(source);
   }
 
   async handleVaultRename(oldPath: string, newPath: string): Promise<void> {
@@ -1448,11 +1403,11 @@ export class LearningService {
   }
 
   private async refreshOpenLearningViews(courseId: string): Promise<void> {
-    await this.layout.refreshLearningViews(courseId);
+    await this.navigationCoordinator.refreshOpenLearningViews(courseId);
   }
 
   private refreshOpenChatLearningControls(): void {
-    this.layout.refreshChatLearningControls();
+    this.navigationCoordinator.refreshOpenChatLearningControls();
   }
 
   private async refreshConversationCache(): Promise<void> {
